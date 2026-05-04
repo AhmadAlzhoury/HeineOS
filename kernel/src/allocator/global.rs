@@ -17,7 +17,7 @@
  */
 
 use alloc::alloc::Layout;
-use crate::allocator::list::BumpAllocator;
+use crate::allocator::bump::BumpAllocator;
 use crate::library::spinlock::{Spinlock, SpinlockGuard};
 
 #[global_allocator]
