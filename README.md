@@ -5,7 +5,10 @@
 2. Low-level programming: Use the PC speaker and PIT to play sounds
 
 A detailed overview on how to implement a heap allocator in Rust is given by Phil Oppermann in his fantastic [blog article](https://os.phil-opp.com/allocator-designs/).  
-General information on memory management can be found in the [slides](https://github.com/hhu-bsinfo/HeineOS/blob/main/slides/memory.pdf).
+
+## Slides for this assignment
+- [PC Speaker example](https://github.com/hhu-bsinfo/HeineOS/blob/main/slides/lecture1_speaker.pdf)
+- [Memory Management](https://github.com/hhu-bsinfo/HeineOS/blob/main/slides/memory.pdf)
 
 ## Assignment 2.1: Bump Allocator
 In this assignment, you will implement a basic *bump allocator*, to understand the integration of a heap allocator into our operating system.  
@@ -94,7 +97,8 @@ Since it is probable that you will not read the counter at the exact time it rea
 All in all, this is a rather hacky solution and will be replaced in the future, once we have a proper system time.
 However, it is a good task to get familiar with low-level programming and the PIT, which will be useful in the future.
 
-A good resource for learning how to use the PIT is [OSDev](http://wiki.osdev.org/Programmable_Interval_Timer).
+A quick overview on programming the PIT and speaker is given by the slides from [lecture 1](https://github.com/hhu-bsinfo/HeineOS/blob/main/slides/lecture1_speaker.pdf).
+An in-depth resource for learning how to use the PIT is [OSDev](http://wiki.osdev.org/Programmable_Interval_Timer).
 Furthermore, a detailed description of the PIT is given in [8254.pdf](https://github.com/hhu-bsinfo/HeineOS/blob/main/slides/8254.pdf).
 
 ## Optional Assignment: Optimized Heap Allocator
