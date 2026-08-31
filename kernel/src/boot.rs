@@ -81,7 +81,9 @@ pub extern "C" fn main(multiboot_magic: u32, multiboot: &multiboot::BootInfo) ->
     // Load the Global Descriptor Table (code in boot.asm)
     unsafe { load_gdt(); }
 
-    // TODO: Call your demo code here.
+
+    demo::lesson1::text_demo();
+    demo::lesson1::keyboard_demo();
 
     // Endless loop, as we cannot return from main().
     loop {}

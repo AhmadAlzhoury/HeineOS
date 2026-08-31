@@ -89,32 +89,66 @@ impl Terminal {
 
     /// Get the current cursor position (column, row).
     pub fn pos(&self) -> (usize, usize) {
-        todo!("terminal::pos() not implemented yet");
+        self.pos
     }
 
     /// Set the cursor position to the given position.
     /// If the position is out of bounds, it is clamped to the terminal size.
     pub fn set_pos(&mut self, col: usize, row: usize) {
-        todo!("terminal::set_pos() not implemented yet");
+        let new_pos = (
+            col.min(self.cols.saturating_sub(1)),
+            row.min(self.rows.saturating_sub(1)),
+        );
+        let mut framebuffer = self.framebuffer.lock();
+
+        Self::clear_cursor(self.pos, &mut framebuffer);
+        self.pos = new_pos;
+        Self::draw_cursor(self.pos, &mut framebuffer);
     }
 
     /// Clear the terminal screen and reset the cursor position to the top-left corner.
     pub fn clear(&mut self) {
-        todo!("terminal::clear() not implemented yet");
+        let mut framebuffer = self.framebuffer.lock();
+        framebuffer.clear();
+        self.pos = (0, 0);
+        Self::draw_cursor(self.pos, &mut framebuffer);
     }
 
     /// Draw a character with the default colors at the current cursor position and advance the cursor.
     /// A newline character moves the cursor to the beginning of the next line.
     /// If the cursor reaches the end of the terminal, the screen scrolls up.
     pub fn put_char(&mut self, c: char) {
-        todo!("terminal::put_char() not implemented yet");
+        self.put_char_colored(c, DEFAULT_FG_COLOR, DEFAULT_BG_COLOR);
     }
 
     /// Draw a colored character at the current cursor position and advance the cursor.
     /// A newline character moves the cursor to the beginning of the next line.
     /// If the cursor reaches the end of the terminal, the screen scrolls up using `framebuffer::scroll_up()`
     pub fn put_char_colored(&mut self, c: char, fg_color: u32, bg_color: u32) {
-        todo!("terminal::put_char_colored() not implemented yet");
+        let mut framebuffer = self.framebuffer.lock();
+        Self::clear_cursor(self.pos, &mut framebuffer);
+
+        if c == '\n' {
+            self.pos.0 = 0;
+            self.pos.1 += 1;
+        } else {
+            let x = self.pos.0 * font_8x8::CHAR_WIDTH;
+            let y = self.pos.1 * font_8x8::CHAR_HEIGHT;
+            framebuffer.draw_char(c, x, y, fg_color, bg_color);
+
+            self.pos.0 += 1;
+            if self.pos.0 >= self.cols {
+                self.pos.0 = 0;
+                self.pos.1 += 1;
+            }
+        }
+
+        if self.pos.1 >= self.rows {
+            framebuffer.scroll_up(font_8x8::CHAR_HEIGHT);
+            self.pos.1 = self.rows.saturating_sub(1);
+        }
+
+        Self::draw_cursor(self.pos, &mut framebuffer);
     }
 
     /// Draw the cursor at the given position by drawing a white space character in the default foreground color.
@@ -140,7 +174,10 @@ impl Terminal {
 impl Write for Terminal {
     /// Write a string to the COM port by iterating over each byte in the string and writing it using `put_char()`.
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        // TODO: Write the string using put_char()
+        for c in s.chars() {
+            self.put_char(c);
+        }
+
         Ok(())
     }
 }

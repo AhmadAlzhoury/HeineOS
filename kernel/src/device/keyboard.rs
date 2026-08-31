@@ -141,7 +141,17 @@ impl Keyboard {
     /// If a complete key event has been decoded, it is returned.
     /// If no byte is available or the key event is not complete yet, None is returned.
     fn try_read_next_byte(&mut self) -> Option<KeyEvent> {
-        todo!("keyboard::try_read_next_byte() not implemented yet");
+        let status = KeyboardStatus::from_bits_retain(unsafe { self.control_port.inb() });
+        if !status.contains(KeyboardStatus::OUTPUT_BUFFER_FULL) {
+            return None;
+        }
+
+        let byte = unsafe { self.data_port.inb() };
+        if self.decode_byte(byte) {
+            Some(self.gather)
+        } else {
+            None
+        }
     }
 
     /// Poll the keyboard for the next key event (press or release).
@@ -150,14 +160,23 @@ impl Keyboard {
     /// CAUTION: This function must not be used anymore, once the keyboard interrupt handler is active,
     /// because it directly reads from the keyboard controller and thus interferes with the interrupt handler.
     pub fn poll_key_event(&mut self) -> KeyEvent {
-        todo!("keyboard::poll_key_event() not implemented yet");
+        loop {
+            if let Some(key) = self.try_read_next_byte() {
+                return key;
+            }
+        }
     }
 
     /// Poll the keyboard for the next key press event.
     /// This function blocks until a key press event has been received and decoded,
     /// discarding any key release events.
     pub fn poll_key_press(&mut self) -> KeyEvent {
-        todo!("keyboard::poll_key_press() not implemented yet");
+        loop {
+            let key = self.poll_key_event();
+            if key.pressed() {
+                return key;
+            }
+        }
     }
 
     /// Set the repeat rate of the keyboard (determined by the speed and delay).
@@ -169,12 +188,65 @@ impl Keyboard {
     /// Valid values are between 0 (minimum delay) and 3 (maximum delay).
     /// 0 = 250ms, 1 = 500ms, 2 = 750ms, 3 = 1000ms
     pub fn set_repeat_rate(&mut self, delay: u8, speed: u8) {
-        todo!("keyboard::set_repeat_rate() not implemented yet");
+        while KeyboardStatus::from_bits_retain(unsafe { self.control_port.inb() })
+            .contains(KeyboardStatus::INPUT_BUFFER_FULL) {}
+
+        unsafe { self.data_port.outb(KeyboardCommand::SetSpeed as u8); }
+
+        while !KeyboardStatus::from_bits_retain(unsafe { self.control_port.inb() })
+            .contains(KeyboardStatus::OUTPUT_BUFFER_FULL) {}
+
+        if unsafe { self.data_port.inb() } != KeyboardResponse::Ack as u8 {
+            return;
+        }
+
+        while KeyboardStatus::from_bits_retain(unsafe { self.control_port.inb() })
+            .contains(KeyboardStatus::INPUT_BUFFER_FULL) {}
+
+        let parameter = ((delay & 0x03) << 5) | (speed & 0x1f);
+        unsafe { self.data_port.outb(parameter); }
+
+        while !KeyboardStatus::from_bits_retain(unsafe { self.control_port.inb() })
+            .contains(KeyboardStatus::OUTPUT_BUFFER_FULL) {}
+
+        if unsafe { self.data_port.inb() } != KeyboardResponse::Ack as u8 {
+            return;
+        }
     }
 
     /// Turn on or off the specified keyboard LED.
     fn set_led(&mut self, led: LedStatus, on: bool) {
-        todo!("keyboard::set_led() not implemented yet");
+        let leds = if on {
+            self.leds.bits() | led.bits()
+        } else {
+            self.leds.bits() & !led.bits()
+        };
+
+        while KeyboardStatus::from_bits_retain(unsafe { self.control_port.inb() })
+            .contains(KeyboardStatus::INPUT_BUFFER_FULL) {}
+
+        unsafe { self.data_port.outb(KeyboardCommand::SetLed as u8); }
+
+        while !KeyboardStatus::from_bits_retain(unsafe { self.control_port.inb() })
+            .contains(KeyboardStatus::OUTPUT_BUFFER_FULL) {}
+
+        if unsafe { self.data_port.inb() } != KeyboardResponse::Ack as u8 {
+            return;
+        }
+
+        while KeyboardStatus::from_bits_retain(unsafe { self.control_port.inb() })
+            .contains(KeyboardStatus::INPUT_BUFFER_FULL) {}
+
+        unsafe { self.data_port.outb(leds); }
+
+        while !KeyboardStatus::from_bits_retain(unsafe { self.control_port.inb() })
+            .contains(KeyboardStatus::OUTPUT_BUFFER_FULL) {}
+
+        if unsafe { self.data_port.inb() } != KeyboardResponse::Ack as u8 {
+            return;
+        }
+
+        self.leds = LedStatus::from_bits_retain(leds);
     }
 
     /// Decode a single byte from the keyboard.

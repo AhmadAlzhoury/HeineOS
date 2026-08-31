@@ -36,32 +36,34 @@ impl<T> Spinlock<T> {
 
     /// Try to acquire the lock once without blocking.
     pub fn try_lock(&'_ self) -> Option<SpinlockGuard<'_, T>> {
-        // TODO: The current implementation always grants access.
-        //       Use AtomicBool::swap() to set the `lock` value to true.
-        //       If the previous values (returned by swap) was also true, the lock is currently held.
-        //       Only if the previous values was false, we can safely grant access and return the `SpinlockGuard`.
-        Some(SpinlockGuard { lock: self })
+        if self.lock.swap(true, Ordering::Acquire) {
+            None
+        } else {
+            Some(SpinlockGuard { lock: self })
+        }
     }
 
     /// Spin until the lock is acquired, then return a guard that allows access to the data.
     pub fn lock(&'_ self) -> SpinlockGuard<'_, T> {
-        // TODO: The current implementation always grants access immediately.
-        //       Use `try_lock()` repeatedly and only return, once the lock is successfully acquired.
-        SpinlockGuard { lock: self }
+        loop {
+            if let Some(guard) = self.try_lock() {
+                return guard;
+            }
+
+            core::hint::spin_loop();
+        }
     }
 
     /// Unlock the spinlock, allowing other threads to acquire it.
     /// This is called automatically when the `SpinlockGuard` is dropped
     /// and thus is not publicly accessible.
     fn unlock(&self) {
-        // TODO: Set the `lock` variable to false, regardless of its previous value.
+        self.lock.store(false, Ordering::Release);
     }
     
     /// Check if the spinlock is currently locked.
     pub fn is_locked(&self) -> bool {
-        // TODO: The current implementation always returns false, as if the lock is not currently acquired.
-        //       Return the actual value of the `lock` variable.
-        false
+        self.lock.load(Ordering::Acquire)
     }
     
     /// Forcefully unlock the spinlock. This should only be used in exceptional cases.

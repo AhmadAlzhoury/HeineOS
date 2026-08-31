@@ -86,7 +86,18 @@ impl ComPort {
 
     /// Write a single byte to the COM port.
     pub fn write_byte(&mut self, byte: u8) {
-        todo!("ComPort::write_byte() not implemented yet");
+
+        while !LineStatus::from_bits_retain(unsafe { self.line_status_port.inb() })
+            .contains(LineStatus::READY_TO_WRITE)
+        {
+            core::hint::spin_loop();
+        }
+
+        unsafe { self.data_port.outb(byte); }
+
+        if byte == b'\n' {
+            self.write_byte(b'\r');
+        }
     }
 }
 
@@ -96,7 +107,10 @@ impl ComPort {
 impl fmt::Write for ComPort {
     /// Write a string to the COM port by iterating over each byte in the string and writing it using `write_byte()`.
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        // TODO: Write the string using write_byte()
+        for byte in s.bytes() {
+            self.write_byte(byte);
+        }
+
         Ok(())
     }
 }
