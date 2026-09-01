@@ -1,0 +1,47 @@
+/*
+ * Contains demos for text output and keyboard input.
+ *
+ * Author: Michael Schoetter, Heinrich Heine University Duesseldorf
+ *         Fabian Ruhland, Heinrich Heine University Duesseldorf, 2026-01-14
+ * License: GPLv3
+ */
+
+use crate::device::keyboard::KEYBOARD;
+use crate::device::terminal::terminal;
+
+/// A simple text demo, displaying formatted numbers.
+pub fn text_demo() {
+    terminal().lock();
+
+    println!("");
+    println!("Text Demo:");
+    println!("");
+    println!("  | dec | hex | bin   |");
+    println!("  |-----|-----|-------|");
+
+    for number in 0..17 {
+        println!(
+            "  |  {:>2} |  {:2x} | {:5b} | ",
+            number,
+            number,
+            number
+        );
+    }
+    println!("");
+}
+
+/// A simple keyboard demo, displaying the events of key presses and releases.
+pub fn keyboard_demo() {
+    terminal().lock();
+
+    println!("");
+    println!("Keyboard Demo:");
+    println!("Press keys on your keyboard. Press 'Esc' to exit the demo.");
+    println!("");
+
+    loop {
+        let key = KEYBOARD.lock().poll_key_event();
+        println!("{:?}", key);
+    }
+    println!("");
+}
