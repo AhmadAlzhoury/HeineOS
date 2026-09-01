@@ -17,6 +17,8 @@
 #![allow(unreachable_code)]
 #![allow(unused_variables)]
 
+extern crate alloc;
+
 use log::{debug, error, info};
 use uefi::mem::memory_map::MemoryMapOwned;
 use crate::device::framebuffer::Framebuffer;
@@ -26,6 +28,8 @@ use crate::logger::Logger;
 
 #[macro_use]
 mod device;
+mod allocator;
+mod consts;
 mod library;
 mod logger;
 mod multiboot;
@@ -81,9 +85,9 @@ pub extern "C" fn main(multiboot_magic: u32, multiboot: &multiboot::BootInfo) ->
     // Load the Global Descriptor Table (code in boot.asm)
     unsafe { load_gdt(); }
 
+    allocator::global::init_allocator(consts::heap_start(), consts::HEAP_SIZE);
 
-    demo::lesson1::text_demo();
-    demo::lesson1::keyboard_demo();
+    demo::lesson2::heap_demo();
 
     // Endless loop, as we cannot return from main().
     loop {}
@@ -123,7 +127,7 @@ fn exit_uefi_boot_services(multiboot: &multiboot::BootInfo) -> MemoryMapOwned {
             .map_or_else(|| {
                 // If the tag is not found, panic with an error message.
                 panic!("Missing EFI system table pointer tag");
-            },|efi_system_table_tag| {
+            }, |efi_system_table_tag| {
                 // The tag is found, we can log the system table address and set it in the `uefi` crate.
                 debug!("EFI system table is located at: {:#x}", efi_system_table_tag.as_ptr() as usize);
                 unsafe { uefi::table::set_system_table(efi_system_table_tag.as_ptr()); }

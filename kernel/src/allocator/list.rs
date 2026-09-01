@@ -59,22 +59,117 @@ impl LinkedListAllocator {
 
     /// Initialize the allocator with the heap bounds given in the constructor.
     pub unsafe fn init(&mut self, heap_start: usize, heap_size: usize) {
-        todo!("list::init() is not implemented yet.")
+        self.heap_start = heap_start;
+        self.heap_end = heap_start
+            .checked_add(heap_size)
+            .expect("Heap end address overflowed");
+        self.head.next = None;
+
+        unsafe {
+            self.add_free_block(heap_start, heap_size);
+        }
     }
 
-    /// Adds the given free memory block 'addr' to the front of the free list.
+    /// Adds the given free memory block in address order and merges adjacent blocks.
     unsafe fn add_free_block(&mut self, addr: usize, size: usize) {
-        todo!("list::add_free_block() is not implemented yet.")
+        assert_eq!(
+            align_up(addr, align_of::<ListNode>()),
+            addr,
+            "Free block address is not aligned"
+        );
+        assert!(
+            size >= size_of::<ListNode>(),
+            "Free block is too small for allocator metadata"
+        );
+
+        let block_end = addr
+            .checked_add(size)
+            .expect("Free block end address overflowed");
+        assert!(
+            addr >= self.heap_start && block_end <= self.heap_end,
+            "Free block lies outside the heap"
+        );
+
+        let mut current = &mut self.head;
+        while let Some(ref next) = current.next {
+            if next.start_addr() >= addr {
+                break;
+            }
+            current = current.next.as_mut().unwrap();
+        }
+
+        if current.size > 0 {
+            assert!(
+                current.end_addr() <= addr,
+                "Free block overlaps its predecessor"
+            );
+        }
+        if let Some(ref next) = current.next {
+            assert!(
+                block_end <= next.start_addr(),
+                "Free block overlaps its successor"
+            );
+        }
+
+        let node_ptr = addr as *mut ListNode;
+        unsafe {
+            node_ptr.write(ListNode::new(size));
+            let node = &mut *node_ptr;
+            node.next = current.next.take();
+            current.next = Some(node);
+        }
+
+        let inserted = current.next.as_mut().unwrap();
+        let merge_successor = inserted
+            .next
+            .as_ref()
+            .is_some_and(|next| inserted.end_addr() == next.start_addr());
+
+        if merge_successor {
+            let successor = inserted.next.take().unwrap();
+            inserted.size += successor.size;
+            inserted.next = successor.next.take();
+        }
+
+        if current.size > 0 && current.end_addr() == addr {
+            let inserted = current.next.take().unwrap();
+            current.size += inserted.size;
+            current.next = inserted.next.take();
+        }
     }
 
     /// Search a free block with the given size and alignment and remove it from the list.
     fn find_free_block(&mut self, size: usize, align: usize) -> Option<(&'static mut ListNode, usize)> {
-        todo!("list::find_free_block() is not implemented yet.")
+        let mut current = &mut self.head;
+
+        while let Some(ref mut block) = current.next {
+            if let Ok(alloc_start) = Self::check_block_for_alloc(block, size, align) {
+                let block = current.next.take().unwrap();
+                current.next = block.next.take();
+                return Some((block, alloc_start));
+            }
+
+            current = current.next.as_mut().unwrap();
+        }
+
+        None
     }
 
     /// Check if the given block is large enough for an allocation with `size` and `align`.
-    fn check_block_for_alloc(block: &ListNode, size: usize, align: usize) -> Result<usize,()> {
-        todo!("list::check_block_for_alloc() is not implemented yet.")
+    fn check_block_for_alloc(block: &ListNode, size: usize, align: usize) -> Result<usize, ()> {
+        let alloc_start = align_up(block.start_addr(), align);
+        let alloc_end = alloc_start.checked_add(size).ok_or(())?;
+
+        if alloc_end > block.end_addr() {
+            return Err(());
+        }
+
+        let excess_size = block.end_addr() - alloc_end;
+        if excess_size > 0 && excess_size < size_of::<ListNode>() {
+            return Err(());
+        }
+
+        Ok(alloc_start)
     }
 
     /// Adjust the given layout so that the resulting allocated memory
@@ -91,12 +186,46 @@ impl LinkedListAllocator {
 
     /// Dump the free list for debugging purposes.
     pub fn dump_free_list(&mut self) {
-        todo!("list::dump_free_list() is not implemented yet.")
+        println!("Free list for heap {:#x}-{:#x}:", self.heap_start, self.heap_end);
+
+        let mut current = self.head.next.as_deref();
+        let mut index = 0;
+        let mut total_free = 0;
+
+        while let Some(block) = current {
+            println!(
+                "  [{}] {:#x}-{:#x}, {} bytes",
+                index,
+                block.start_addr(),
+                block.end_addr(),
+                block.size
+            );
+            total_free += block.size;
+            index += 1;
+            current = block.next.as_deref();
+        }
+
+        println!("Free blocks: {}, total free: {} bytes", index, total_free);
     }
 
     /// Allocate memory of the given size and alignment.
     pub unsafe fn alloc(&mut self, layout: Layout) -> *mut u8 {
-        todo!("list::alloc() is not implemented yet.")
+        let (size, align) = Self::size_align(layout);
+
+        if let Some((block, alloc_start)) = self.find_free_block(size, align) {
+            let alloc_end = alloc_start + size;
+            let excess_size = block.end_addr() - alloc_end;
+
+            if excess_size > 0 {
+                unsafe {
+                    self.add_free_block(alloc_end, excess_size);
+                }
+            }
+
+            alloc_start as *mut u8
+        } else {
+            core::ptr::null_mut()
+        }
     }
 
     /// Free the memory block at the given pointer with the given layout.

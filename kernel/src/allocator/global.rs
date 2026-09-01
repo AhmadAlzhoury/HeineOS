@@ -17,12 +17,12 @@
  */
 
 use alloc::alloc::Layout;
-use crate::allocator::bump::BumpAllocator;
+use crate::allocator::list::LinkedListAllocator;
 use crate::library::spinlock::{Spinlock, SpinlockGuard};
 
 #[global_allocator]
 /// Global heap allocator instance, used by the Rust compiler for dynamic memory allocation.
-static ALLOCATOR: Locked<BumpAllocator> = Locked::new(BumpAllocator::new());
+static ALLOCATOR: Locked<LinkedListAllocator> = Locked::new(LinkedListAllocator::new());
 
 /// Helper function used in `bump.rs` and `list.rs`. Rust requires pointers to be aligned.
 pub fn align_up(addr: usize, align: usize) -> usize {

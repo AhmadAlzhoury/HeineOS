@@ -89,24 +89,51 @@ impl Speaker {
 
     /// Play a specific frequency for a given amount of time (milliseconds).
     pub fn play(&mut self, frequency: usize, duration: usize) {
-        todo!("Speaker::play() is not implemented yet.")
+        if frequency == 0 {
+            self.off();
+            self.delay(duration);
+            return;
+        }
+
+        let counter = (PIT_FREQUENCY / frequency).clamp(1, u16::MAX as usize) as u16;
+
+        unsafe {
+            self.pit_ctrl_port.outb(0xb6);
+            self.pit_data2_port.outb((counter & 0xff) as u8);
+            self.pit_data2_port.outb((counter >> 8) as u8);
+        }
+
+        self.on();
+        self.delay(duration);
+        self.off();
     }
 
     /// Turn on the speaker.
     /// The played tone is dependent on counter 2 of the PIT.
     pub fn on(&mut self) {
-        todo!("Speaker::on() is not implemented yet.")
+        unsafe {
+            let status = self.ppi_port.inb();
+            self.ppi_port.outb(status | 0x03);
+        }
     }
 
     /// Turn off the speaker.
     pub fn off(&mut self) {
-        todo!("Speaker::off() is not implemented yet.")
+        unsafe {
+            let status = self.ppi_port.inb();
+            self.ppi_port.outb(status & !0x03);
+        }
     }
 
     /// Return the current value of the PIT counter (16-bit).
     /// Used by `delay()` to check if the counter has reached 0 or has been reloaded.
     fn read_counter(&mut self) -> u16 {
-        todo!("Speaker::read_counter() is not implemented yet.")
+        unsafe {
+            self.pit_ctrl_port.outb(0x00);
+            let low = self.pit_data0_port.inb() as u16;
+            let high = self.pit_data0_port.inb() as u16;
+            (high << 8) | low
+        }
     }
 
     /// Wait for a given amount of time in milliseconds using counter 0 of the PIT.
@@ -114,7 +141,28 @@ impl Speaker {
     /// This means that the counter will count down from 1193 to 0 and then reload itself.
     /// Counting from 1193 to 0 takes 1ms.
     fn delay(&mut self, duration: usize) {
-        todo!("Speaker::delay() is not implemented yet.")
+        if duration == 0 {
+            return;
+        }
+
+        const RELOAD_VALUE: u16 = 1193;
+
+        unsafe {
+            self.pit_ctrl_port.outb(0x34);
+            self.pit_data0_port.outb((RELOAD_VALUE & 0xff) as u8);
+            self.pit_data0_port.outb((RELOAD_VALUE >> 8) as u8);
+        }
+
+        let mut elapsed = 0;
+        let mut previous = self.read_counter();
+
+        while elapsed < duration {
+            let current = self.read_counter();
+            if current > previous {
+                elapsed += 1;
+            }
+            previous = current;
+        }
     }
 }
 
