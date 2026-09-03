@@ -117,16 +117,44 @@ impl Pic {
 
     /// Enable an IRQ to be forwarded to the processor by the PIC.
     pub fn allow (&mut self, irq: Irq) {
-        todo!("Pic::allow() not implemented yet.");
+        let irq = irq as u8;
+
+        unsafe {
+            if irq < 8 {
+                let mask = self.data1.inb();
+                self.data1.outb(mask & !(1 << irq));
+            } else {
+                let mask = self.data2.inb();
+                self.data2.outb(mask & !(1 << (irq - 8)));
+            }
+        }
     }
 
     /// Disable an IRQ to be forwarded to the processor by the PIC.
     pub fn forbid (&mut self, irq: Irq) {
-        todo!("Pic::forbid() not implemented yet.");
+        let irq = irq as u8;
+
+        unsafe {
+            if irq < 8 {
+                let mask = self.data1.inb();
+                self.data1.outb(mask | (1 << irq));
+            } else {
+                let mask = self.data2.inb();
+                self.data2.outb(mask | (1 << (irq - 8)));
+            }
+        }
     }
 
     /// Get the state (enabled/disabled) of an IRQ in the PIC.
     pub fn status (&mut self, irq: Irq) -> bool {
-        todo!("Pic::status() not implemented yet.");
+        let irq = irq as u8;
+
+        unsafe {
+            if irq < 8 {
+                self.data1.inb() & (1 << irq) == 0
+            } else {
+                self.data2.inb() & (1 << (irq - 8)) == 0
+            }
+        }
     }
 }

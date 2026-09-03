@@ -6,7 +6,7 @@
  * License: GPLv3
  */
 
-use crate::device::keyboard::KEYBOARD;
+use crate::device::keyboard::keyboard_buffer;
 use crate::device::terminal::terminal;
 
 /// A simple text demo, displaying formatted numbers.
@@ -40,7 +40,7 @@ pub fn keyboard_demo() {
     println!("");
 
     loop {
-        let key = KEYBOARD.lock().poll_key_event();
+        let key = keyboard_buffer().poll_key_event();
         println!("{:?}", key);
     }
     println!("");

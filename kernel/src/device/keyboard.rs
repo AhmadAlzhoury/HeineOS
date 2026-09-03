@@ -153,7 +153,7 @@ impl Keyboard {
 
         let byte = unsafe { self.data_port.inb() };
         if status.contains(KeyboardStatus::AUXILIARY_DEVICE) {
-            return None;
+            return None; // discard mouse events
         }
 
         if self.decode_byte(byte) {
@@ -438,12 +438,26 @@ impl ISR for KeyboardISR {
     /// Keyboard interrupt handler.
     /// This function reads the next byte from the keyboard and decodes it into a key event.
     fn trigger(&self) {
-        todo!("KeyboardISR::trigger() not implemented yet!");
+        log::debug!("Keyboard interrupt handler triggered");
+
+        let mut keyboard = KEYBOARD.lock();
+        loop {
+            let status = KeyboardStatus::from_bits_retain(unsafe { keyboard.control_port.inb() });
+            if !status.contains(KeyboardStatus::OUTPUT_BUFFER_FULL) {
+                break;
+            }
+
+            if let Some(key) = keyboard.try_read_next_byte() {
+                keyboard_buffer().push_key_event(key);
+            }
+        }
     }
 }
 
 /// Register the keyboard interrupt handler with the interrupt dispatcher
 /// and enable keyboard interrupts at the PIC.
 pub fn plugin() {
-    todo!("Keyboard::plugin() not implemented yet!");
+    keyboard_buffer();
+    IntVectors::register(InterruptVector::Keyboard, Box::new(KeyboardISR));
+    PIC.lock().allow(Irq::Keyboard);
 }

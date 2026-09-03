@@ -7,3 +7,4 @@ pub mod terminal;
 pub mod key;
 pub mod keyboard;
 pub mod speaker;
+pub mod pic;

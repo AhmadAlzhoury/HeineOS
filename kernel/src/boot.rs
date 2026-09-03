@@ -19,7 +19,8 @@
 
 extern crate alloc;
 
-use log::{debug, error, info};
+use core::str::FromStr;
+use log::{debug, error, info, warn, LevelFilter};
 use uefi::mem::memory_map::MemoryMapOwned;
 use crate::device::framebuffer::Framebuffer;
 use crate::device::serial::COM1;
@@ -34,6 +35,7 @@ mod library;
 mod logger;
 mod multiboot;
 mod demo;
+mod interrupt;
 
 unsafe extern "C" {
     fn load_gdt();
@@ -77,6 +79,8 @@ pub extern "C" fn main(multiboot_magic: u32, multiboot: &multiboot::BootInfo) ->
     // However, the `print!()` and `println!()` macros will not work then.
     terminal::init_terminal(framebuffer);
 
+    configure_kernel_options(multiboot);
+
     // Exit UEFI boot services. At this point, the UEFI boot services are still active.
     // By exiting them, the UEFI BIOS frees up resources and hands over full control to the kernel.
     // Furthermore, we get the memory map, which we need to check which memory regions are free to use.
@@ -87,10 +91,76 @@ pub extern "C" fn main(multiboot_magic: u32, multiboot: &multiboot::BootInfo) ->
 
     allocator::global::init_allocator(consts::heap_start(), consts::HEAP_SIZE);
 
-    demo::lesson2::heap_demo();
+    init_interrupts();
+
+    demo::lesson3::keyboard_interrupt_demo();
 
     // Endless loop, as we cannot return from main().
     loop {}
+}
+
+/// Configure the kernel from the command line supplied by the bootloader.
+fn configure_kernel_options(multiboot: &multiboot::BootInfo) {
+    let Some(command_line) = multiboot
+        .find_tag::<multiboot::CommandLineTag>(multiboot::TagType::CommandLine)
+        .map(multiboot::CommandLineTag::as_str)
+    else {
+        return;
+    };
+
+    let mut log_level = None;
+    let mut terminal_logging = None;
+
+    for option in command_line.split_whitespace() {
+        let Some((name, value)) = option.split_once('=') else {
+            warn!("Ignoring malformed kernel option '{}'", option);
+            continue;
+        };
+
+        match name {
+            "log_level" => {
+                log_level = parse_log_level(value);
+                if log_level.is_none() {
+                    warn!("Ignoring invalid log level '{}'", value);
+                }
+            },
+            "log_to_terminal" => match value {
+                "true" => terminal_logging = Some(true),
+                "false" => terminal_logging = Some(false),
+                _ => warn!("Ignoring invalid terminal logging value '{}'", value),
+            },
+            _ => warn!("Ignoring unknown kernel option '{}'", name),
+        }
+    }
+
+    if let Some(enabled) = terminal_logging {
+        LOGGER.enable_terminal_logging(enabled);
+    }
+    if let Some(level) = log_level {
+        log::set_max_level(level);
+    }
+
+    info!("Command line: '{}'", command_line);
+}
+
+/// Parse a full log level name or its three-letter abbreviation.
+fn parse_log_level(value: &str) -> Option<LevelFilter> {
+    match value {
+        "TRC" | "trc" => Some(LevelFilter::Trace),
+        "DBG" | "dbg" => Some(LevelFilter::Debug),
+        "INF" | "inf" => Some(LevelFilter::Info),
+        "WRN" | "wrn" => Some(LevelFilter::Warn),
+        "ERR" | "err" => Some(LevelFilter::Error),
+        _ => LevelFilter::from_str(value).ok(),
+    }
+}
+
+fn init_interrupts() {
+    interrupt::dispatcher::init_interrupt_dispatcher();
+    interrupt::idt::idt().load();
+    device::pic::PIC.lock().init();
+    device::keyboard::plugin();
+    device::cpu::enable_int();
 }
 
 /// Exit UEFI boot services.

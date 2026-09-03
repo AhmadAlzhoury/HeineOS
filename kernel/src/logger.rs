@@ -7,16 +7,26 @@
  */
 
 use core::fmt::Write;
+use core::sync::atomic::{AtomicBool, Ordering};
 use log::{Metadata, Record};
-use crate::device::serial;
+use crate::device::{serial, terminal};
 
 /// A simple logger implementing the `log::Log` trait, writing to the serial port (COM1).
-pub struct Logger {}
+pub struct Logger {
+    terminal_logging: AtomicBool,
+}
 
 impl Logger {
     /// Create a new logger.
     pub const fn new() -> Logger {
-        Logger {}
+        Logger {
+            terminal_logging: AtomicBool::new(false),
+        }
+    }
+
+    /// Enable or disable mirroring log messages to the terminal.
+    pub fn enable_terminal_logging(&self, enabled: bool) {
+        self.terminal_logging.store(enabled, Ordering::Release);
     }
 }
 
@@ -41,6 +51,19 @@ impl log::Log for Logger {
             line,
             record.args()
         );
+
+        if self.terminal_logging.load(Ordering::Acquire) {
+            if let Some(mut terminal) = terminal::terminal().try_lock() {
+                let _ = writeln!(
+                    &mut *terminal,
+                    "[0.000] [{}] [{}@{}] : {}",
+                    level_abbreviation(record.level()),
+                    file,
+                    line,
+                    record.args()
+                );
+            }
+        }
     }
 
     /// Flush the logger.

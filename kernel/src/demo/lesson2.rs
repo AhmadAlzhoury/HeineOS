@@ -10,7 +10,7 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use crate::allocator;
 use crate::device::key::Scancode;
-use crate::device::keyboard::KEYBOARD;
+use crate::device::keyboard::keyboard_buffer;
 use crate::device::speaker;
 use crate::device::speaker::SPEAKER;
 use crate::device::terminal::terminal;
@@ -27,7 +27,7 @@ pub fn heap_demo() {
         println!("\nPress Enter to continue...");
 
         loop {
-            let key = KEYBOARD.lock().poll_key_press();
+            let key = keyboard_buffer().poll_key_press();
             if key.scancode() == Some(Scancode::Enter) {
                 break;
             }
