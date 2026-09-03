@@ -1,181 +1,155 @@
-# Lesson 4: Cooperative Multitasking
+# Aufgabe 5: Preemptive Multithreading
 
 ## Learning Goals
-1. Refresh your assembly knowledge
-2. Understand the process of switching between coroutines
-3. Learn the difference between coroutines and threads
-4. Understand how a scheduler works
+1. Understand how preemptive multithreading works
+2. Automatically yield the CPU in a fixed interval using the PIT
+3. Avoid deadlocks in preemptive multithreading
 
-*It is recommended to read the [assembly crash course](https://github.com/hhu-bsinfo/HeineOS/blob/main/slides/asm.pdf) first.*
+## Assignment 5.1: Programmable Interval Timer (PIT)
+From now on, we will use the PIT to implement a system timer and automatically switch between threads at a fixed interval.
+The system time is stored in the variable `SYSTEM_TIME` (in [pit.rs](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-5/kernel/src/device/pit.rs)) and should increment every time the PIT triggers an interrupt.
+Use the PIT's counter 0 and mode 3 and load the counter with a suitable value so that the PIT triggers an interrupt every millisecond.
+This way, `SYSTEM_TIME` shows how many ticks (i.e., milliseconds) have passed since the timer has been started.
 
-## Slides for this assignment
-- Lecture 5: [Coroutines](https://github.com/hhu-bsinfo/HeineOS/blob/main/slides/lecture5_coroutines.pdf)
-- Lecture 6: [Scheduling](https://github.com/hhu-bsinfo/HeineOS/blob/main/slides/lecture6_scheduling.pdf)
-- [Assembly Crash Course](https://github.com/hhu-bsinfo/HeineOS/blob/main/slides/asm.pdf)
+Furthermore, the system time should be visualized on the screen using a rotating spinner.
+Use the signs `| / - \` (given in `SPINNER_CHARS`) and change the current sign at a fixed interval (e.g., every 250 ms).
+The current sign should be displayed at a fixed position on the screen (e.g., on the right upper corner).
+To draw the spinner, you can access the framebuffer via `terminal::framebuffer()`.
+However, you need to lock the framebuffer instance before you can draw to it.
+This is a potential source for a deadlock, since we are currently inside an interrupt handler.
+To avoid this, use `try_lock()` and only draw the spinner if the lock can be acquired.
 
-## Assignment 4.1: Coroutines
-In this assignment, you will implement **coroutines** using Rust and assembly language. We use coroutines as a preliminary step towards multithreading.
+![System Time Spinner](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-5/spinner.gif)
 
-Start by looking at the new file [coroutine/coroutine.rs](kernel/src/coroutine/coroutine.rs).
-Your first task is to implement the functions `coroutine_start()` und `coroutine_switch()`. Since these are `naked`, they may only contain assembly code.
-It is not possible to access Rust variables by their name from within assembly code. All parameters must be read from the corresponding CPU registers.
-All assembly instructions must be entered as strings, separated by commas, inside the `naked_asm!()` macro.
+Finally, implement `pit::plugin()` to initialize the PIT using `TIMER.init(|| { ... })`, set the interrupt interval and register the interrupt in `interrupt/dispatcher.rs`.
+Additionally, the PIT interrupts should be allowed in the PIC. Call `pit::plugin()` in `startup.rs` to start the timer.
 
-The state of a coroutine must be saved on the stack. This includes all CPU registers. A pointer to the last stack entry should be stored in the `Coroutine::stack_ptr` field.
+If you want to, you can now use the system time in your log messages, printing it, for example, at the beginning of each message.
 
-Afterward, implement the remaining empty methods in `coroutine.rs`. Coroutines are chained together using the `next` field in the `struct Coroutine`.
+## Assignment 5.2: Waiting using the System Time
+Now that we have an incrementing system time, we can use it to implement a waiting function.
+The function `pit::wait(ms: usize)` should loop until the given number of milliseconds has passed.
 
-Test your coroutines by implementing the test functions in the file [demo/lesson4.rs](kernel/src/demo/lesson4.rs).
-Your test should create three coroutines that are chained together. Each of them should increment its own counter variable and print it at a fixed position on the screen.
-A coroutine should switch to the next one after each iteration. Because they are chained together, forming a cycle, the coroutines switch in a round-robin fashion, and it looks like the counters are incremented in parallel.
-To set the cursor position, you need to lock the terminal instance temporarily. You should use the macro `print_terminal!()` to print the counter using the locked terminal reference.
-Make sure to unlock the terminal instance before switching to the next coroutine. Otherwise, the next coroutine will get stuck at acquiring the terminal lock, resulting in a deadlock.
+To test your implementation, replace all `delay()` calls in the PC speaker driver with `pit::wait()`.
+The `delay()` function cannot be used anymore, since it programs the PIT directly using its counter 0, which would interfere with our system time.
 
-The demo should look like this (the braced numbers show the coroutine IDs):
+Playing the builtin melodies should work as before when using `pit::wait()` instead of `delay()`.
 
-![Coroutine Demo](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-4/coroutines.png)
+## Assignment 5.3: Switching Threads using the PIT
+In this assignment, the PIT interrupt will be used to switch threads at a fixed interval.
 
-Further information on the coroutine implementation can be found in the [coroutine slides](slides/coroutine.pdf),
+Start by adding a new instance variable to `SchedulerState` called `initialized` to indicate whether the scheduler is already running.
+It should set to `false` initially and switched to `true` in `Scheduler::schedule()` (directly before the first thread is started).
 
-## Assignment 4.2: Queue
-Before we can implement a scheduler for threads, we need to implement a queue.
-We use a linked list for this, which always removes the first element from the beginning of the list and always appends at the end.
-When using this for a scheduler, the next thread to be executed is always the one that is at the head of the list, and the thread that was just executed is always appended to the end.
+In `Scheduler::yield_cpu()`, you should now check whether the scheduler is already running and only switch threads if so.
+Furthermore, we must make sure to not cause a deadlock when locking `Scheduler::state`.
+This can happen, if the pit interrupt is triggered and initiates a thread switch, while `Scheduler::state` is locked.
+In this case, the system would get stuck at acquiring the lock and never return from the interrupt.
+Use `try_lock()` to check whether the lock can be acquired and return if it cannot.  
+There is still one potential deadlock left: As the scheduler modifies the thread queue in `yield_cpu()`, the allocator is invoked.
+If the allocator is currently locked while the pit triggers a thread switch, we also run into a deadlock.
+To avoid this, check whether the allocator is currently locked in `yield_cpu()`, using `allocator::global::is_allocator_locked()` and only switch threads if it returns `false`.
 
-Implementing a linked list in Rust is challenging, which is why you only need to implement the `remove()` function.
+Once you have modified the scheduler, call `Scheduler::yield_cpu()` in the PIT's interrupt handler at a fixed interval.
+Every 10 ms is a good choice. Smaller values will slow down the system, as more time is spent in the scheduler.
+Too large values can cause the system to be unresponsive, as threads are not switched quickly enough.
+You are, of course, free to experiment with different values and see how the system behaves.
 
-The queue implementation is given in the file [library/queue.rs](kernel/src/library/queue.rs).
+Finally, there is one deadlock left that we must fix:
+Every interrupt is first handled by `dispatch_interrupt()` in `interrupt/dispatcher.rs`, which locks `INT_VECTORS`.
+The lock is automatically released after the interrupt handler returns.
+However, if the PIT switches threads, we directly return into the next thread from within the PIT's interrupt handler.
+Because of this, the lock protecting `INT_VECTORS` is not released.
+To fix this, we must call `interrupt::dispatcher::unlock_int_vectors()` before calling `Scheduler::yield_cpu()` inside the PIT's interrupt handler.
+This force unlocks `INT_VECTORS`, which would usually be highly unsafe. But since we only do this inside an interrupt handler, which cannot be interrupted, it is safe (although somewhat ugly).
 
-## Assignment 4.3: From Coroutines to Threads
-Look at the given code in [thread/thread.rs](kernel/src/thread/thread.rs).
-It is very similar to the coroutine implementation, and you can copy over most of your code from assignment 4.1.
-You only need to adapt the function names. Notice that the `next` field is missing in the `Thread` struct, since we will manage the threads in a separate queue instead of directly linking them together.
+## Assignment 5.4: Preemptive Multithreading Demo
+Test your implementation with the multithreading demo from assignment 4.5.
+However, remove the `yield_cpu()` call, since we now want to check whether preemptive multithreading works.
+Furthermore, an additional thread should be spawned that plays a melody via the PC speaker.
 
-Implement all empty functions in `thread.rs` using your coroutine code. *You cannot test this right now, since we haven't implemented a scheduler yet.*
+You will probably notice the following behavior:
+1. Primarily, only one thread outputs its counter. Only occasionally, we can observe a switch to another thread.
+2. Nevertheless, the PC speaker plays a melody, which means that scheduler must be working correctly.
+3. The system time spinner seems to be updated irregularly.
 
-## Assignment 4.4: Scheduler
-In this assigment, you will implement a basic scheduler for threads. All threads are managed in a *ready Queue* (see assignment 4.2) and are switched in a round-robin fashion.
-This is still a cooperative multitasking scheduler, so the threads need to manually yield the CPU to other threads by calling `Scheduler::yield_cpu()`.
-The scheduler will not support priorities or other advanced features. The current thread is always stored in `SchedulerState::active_thread`, while all wating threads are stored in `SchedulerState::ready_queue`.
-The given code also includes an implementation for an [idle thread](kernel/src/thread/idle_thread.rs), which should always be registered with the scheduler, to ensure that at least one thread is always running.
+This behavior is caused by the fact that our threads all need to acquire a lock on the terminal, which in turn also locks the framebuffer when drawing characters.
+Since our demo threads spent most of their time printing to the screen, there is only a tiny time window during which the terminal (and the framebuffer) is not locked.
+Because of this, the thread that first acquires the terminal lock keeps it for a long time, as the probability of a thread switch at the exact (short) moment when it releases the lock is only small.
+This causes the other two threads to *starve* and is also the reason the system time spinner is drawn less frequently, as the PIT's interrupt handler cannot acquire the lock most of the time.
 
-Notice how all methods of the scheduler are called with a const `&self` reference, although they alter the state of the scheduler (e.g., enqueue and dequeue threads from the ready queue).
-This is realized by wrapping the scheduler's variables `ready_queue` and `active_thread` in a separate struct called `SchedulerState` and protecting this with a `Spinlock`.
-This way, a const reference is enough to access and modify the scheduler's state without breaking the Rust compiler's contract, as the spinlock allows only one thread to access the scheduler's state at a time.
+Try inserting a `pit::wait(100)` call after each time the thread outputs its counter (and the terminal lock is released).
+You should now see all three threads output their counter, albeit very slowly.
+This works, because now the probability of a thread switch while the thread is inside `pit::wait()` is much higher than while it holds the terminal lock.
+However, this is not a good solution, since it wastes a lot of computation time.
+A better solution would be, to manually call `scheduler::yield_cpu()` every few iterations (e.g., 10).
 
-This causes a problem with the `yield_cpu()` and `exit()` methods: Usually, the spinlock is released automatically when a function returns.
-However, in these two functions, we switch to another thread, meaning that we do not return from the function directly and the scheduler state remains locked.
-Any further call to one of the scheduler's methods would result in a deadlock. To prevent this, the assembly code in `thread_start()` and `thread_switch()` must be modified to unlock the spinlock directly after setting the `rsp` register, by calling `unlock_scheduler()`.
+In general, this demo is pathological for such kind of behavior.
+In real-world scenarios, there would be much more computation done besides drawing to the screen.
+However, it shows the pitfalls we have to be aware of when using preemptive multithreading.
 
-Implement the empty functions in [thread/scheduler.rs](kernel/src/thread/scheduler.rs).
-When a thread switches via `yield_cpu()`, the currently active thread should be enqueued at the end of the ready queue and the new active thread should be stored in `SchedulerState::active_thread`.
-*Notice that you cannot access the formerly active thread anymore after enqueuing it in the ready queue. Because of this, you should store a pointer to this thread in a local variable, as you need to pass it to `thread_switch()`.*
+Finally, calling `Scheduler::kill()` is not a good idea in a preemptive environment.
+If we kill a thread while it holds a lock, the lock will never be released.
+For this reason, you do not need to kill threads anymore in the demo. Instead, let them exit when their counter reaches a certain value.
 
-Test your scheduler implementation by only readying the idle thread before moving on the next assignment.
-Implement a basic text output in the idle thread to see if it works.
+Your demo should now look like this:
 
-## Assignment 4.5 Multithreading Demo
-Start by creating a very basic thread that only prints a message and terminates itself. Afterward, only the idle thread should be running.
+![Thread Demo](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-5/threads.gif)
 
-As a more advanced test, implement the counter demo from assignment 4.1 using threads instead of coroutines.
-Extend the demo, by letting one of the counter threads kill the ones by calling `Scheduler::kill()` after a certain amount of increments.
-The last remaining thread should terminate itself by calling `Scheduler::exit()` when it reaches a certain counter value.
-Afterward, only the idle thread should remain running.
+## Assignment 5.5: Freeing Thread Resources
+Each thread allocates its stack on the heap. This should be freed automatically when the thread's lifetime ends.
+Look at `Scheduler::exit()`: The thread that terminates is taken out of `SchedulerState::active_thread` and **not** inserted into `SchedulerState::ready_queue`.
+Usually, the thread should now automatically be dropped (deallocating its stack) once `Scheduler::exit()` returns.
+In fact, the compiler inserts the `drop()` call at the end of `Scheduler::exit()`, but since we call `Thread::switch()` beforehand, the implicit `drop()` call is never executed.
 
-*Caution: Calling `Scheduler::kill()` is generally not recommended, since it can lead to deadlocks, if the killed thread is currently holding a lock.*
+A first attempt at fixing this, might be to call `drop()` manually on the thread before calling `Thread::switch()`.
+However, there are two problems with this approach:
+1. We still need the thread instance during `Thread::switch()`.
+2. During the `drop()` call, the heap allocator will get locked. If it was already locked before, we run into a deadlock because the scheduler state is also currently locked, preventing any other thread switches.
 
-![Thread Demo](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-4/threads.png)
+To work around these problems, you should introduce a second queue to `SchedulerState` called `terminated_threads`.
+In `Scheduler::exit()`, the terminated thread should be inserted into this queue before calling `Thread::switch()`.
+This way, all terminated threads are gathered in one place with `terminated_threads` having the ownership of all the instances.  
+Now, implement a new function `cleanup_terminated_threads()` in the scheduler that dequeues all threads from `SchedulerState::terminated_threads`, thus freeing their resources.
+Note that you do not need to call `drop()` on the threads, just dequeuing them is enough, as Rust will automatically drop them once they have no owner anymore.
+Finally, use the idle thread to call `cleanup_terminated_threads()` regularly.
 
-## Optional Assignment: A nicer Font
-The 8x8 font included in HeineOS does the job, but it is rather small and only contains basic ASCII characters.
-In this assignment, you may switch to a nicer 8x16 font supporting Unicode characters. The font is provided by the [unifont](https://lib.rs/crates/unifont) crate.
+## Optional Assignment: Performance Optimizations
+In this optional assignment, we will tune some parts of the code to improve the performance of our operating system.
 
-Start by adding a dependency to the `unifont` crate in `kernel/Cargo.toml` under the `[dependencies]` section:
-```toml
-unifont = "1.1.0"
+### Waste less time when waiting
+As a first step, yield the CPU manually while waiting in `pit::wait()`.
+This way, the CPU spends less time spinning in the wait loop but rather switches to other threads.
+
+### More efficient locks
+The same applies for our `Spinlock`. Manually switch to next thread while the lock cannot be acquired in `Spinlock::lock()`.
+This should greatly improve the performance of our thread demo.
+
+To see the performance improvements, you can measure the time it takes each thread to count to a specific value (e.g., 1000)
+Store the system time before entering the loop in a variable. Then use it to calculate the time it took to count to the desired value.
+Print the time it took for each thread at the end of the loop.
+
+Now start the demo one time without the optimized `Spinlock` and one time with the optimizations applied.
+In my testing, I could see a 3x performance improvement for the thread demo.
+
+| Without optimized Spinlock                                                                                                                                 | With optimized Spinlock                                                                                                                               |
+|------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ![Thread Demo Without Spinlock Optimizations](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-5/threads_unoptimized.png) | ![Thread Demo With Spinlock Optimizations](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-5/threads_optimized.png) |
+
+
+### Compiler optimizations
+Until now, we have used *debug* build to test our system. In such builds, the compiler does not optimize the code as much as it does in *release* builds.
+You can use the following command to enable compiler optimization:
+
+```shell
+cargo make --no-workspace --profile production qemu
 ```
 
-Next, you may want to specify the font's size as constant in `device/framebuffer.rs`:
-```rust
-pub const CHAR_WIDTH: usize = 8;
-pub const CHAR_HEIGHT: usize = 16;
-```
+This should significantly improve the performance of our system. However, be aware that you cannot debug release builds.
+Use debug builds during development and for fixing problems and release builds to test the final system.
 
-Now, replace the `draw_char()` implementation with a new one, which uses the `unifont` crate to draw the character.
-The crate provides the function `unifont::get_glyph(c: char)` to get the glyph for a given character.
-The glyph is a struct containing the actual bitmap data. Use a loop in conjunction with the `Glyph::get_pixel()` function to iterate over the pixels and draw them to the framebuffer.
+While it took the demo threads around 7 seconds to count to 1000 in my testing before, they now count to 150000 in roughly the same time.
+This is a huge performance improvement of 150x just by enabling compiler optimizations.
+As you will see, especially drawing to the screen is now much faster, and it is highly recommended to test your system with compiler optimizations enabled during the next assignments.
 
-Notice that glyphs can either `Halfwidth` or `Fullwidth`, depending on the character.
-A `Fullwidth` character is 16 pixels wide instead of 8. As we do no support fonts with different widths, we can simply ignore `Fullwidth` glyphs.
-These are mainly used for emojis and other special characters. Implementing a `draw_string()` function that supports `Fullwidth` would not be difficult.
-However, supporting these glyphs in the terminal is not a trivial task, which is why we support only the normal `Halfwidth` glyphs in this assignment.
-However, you are of course free to experiment with `Fullwidth` glyphs as much as you like.
-
-As a last step, all usages of `font8x8::CHAR_WIDTH` and `font8x8::CHAR_HEIGHT` in your operating system must be replaced with `framebuffer::CHAR_WIDTH` and `framebuffer::CHAR_HEIGHT`.
-
-![Unifont Demo](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-4/unifont.png)
-
-### Supporting multiple fonts
-It is possible to support both the old 8x8 font and the new font and select the one to use at compile time.
-This can be done by introducing a *feature* flag in `Cargo.toml` and using conditional compilation in `framebuffer.rs`.
-
-Start by modifying `Cargo.toml` to include a new feature flag and making the `unifont` dependency optional:
-```toml
-unifont = { version = "1.1.0", optional = true }
-
-[features]
-unifont = ["dep:unifont"]
-```
-
-Now, the `unifont` crate will only be compiled if the `unifont` feature flag is enabled.
-
-In `framebuffer.rs`, we need to check if the `unifont` feature is enabled and include different code depending on the result.
-This can be achieved by using the `cfg` attribute and needs to be done in three places:
-
-1. Include the `font8x8` module only if the `unifont` feature is not enabled:
-```rust
-#[cfg(not(feature = "unifont"))]
-use crate::device::font_8x8;
-```
-
-2. Define the `CHAR_WIDTH` and `CHAR_HEIGHT` constants depending on the feature flag:
-```rust
-#[cfg(feature = "unifont")]
-pub const CHAR_WIDTH: usize = 8;
-#[cfg(not(feature = "unifont"))]
-pub const CHAR_WIDTH: usize = font_8x8::CHAR_WIDTH;
-
-#[cfg(feature = "unifont")]
-pub const CHAR_HEIGHT: usize = 16;
-#[cfg(not(feature = "unifont"))]
-pub const CHAR_HEIGHT: usize = font_8x8::CHAR_HEIGHT;
-```
-
-3. Define two variants of the `draw_char()` function, depending on the feature flag:
-```rust
-#[cfg(feature = "unifont")]
-/// Draw a single character at the specified (x, y) coordinates with the given foreground and background colors.
-/// If the character does not fit fully within the framebuffer, it is not drawn.
-/// This implementation uses the font provided by `unifont` crate.
-pub fn draw_char(&mut self, c: char, x: usize, y: usize, fg_color: u32, bg_color: u32) {
-    ...
-}
-
-#[cfg(not(feature = "unifont"))]
-/// Get the pixel data for a character from the `font_8x8` font data.
-fn get_char_pixels(c: char) -> &'static [u8] {
-    ...
-}
-
-#[cfg(not(feature = "unifont"))]
-/// Draw a single character at the specified (x, y) coordinates with the given foreground and background colors.
-/// If the character does not fit fully within the framebuffer, it is not drawn.
-/// This implementation uses the font provided by the `font_8x8` module.
-pub fn draw_char(&mut self, c: char, x: usize, y: usize, fg_color: u32, bg_color: u32) {
-    ...
-}
-```
-
-To enable the feature flag during compilation, you need to edit the arguments for the `compile` task in `kernel/Makefile.toml`.
-Simply add `"--features", "unifont"`, to the list of arguments and perform a clean build.
-To switch back to the old font, remove the `--features` argument and perform a clean build.
+![Thread Demo With Compiler Optimizations](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-5/threads_release.png)
