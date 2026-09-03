@@ -16,7 +16,7 @@
 ## Assignment 4.1: Coroutines
 In this assignment, you will implement **coroutines** using Rust and assembly language. We use coroutines as a preliminary step towards multithreading.
 
-Start by looking at the new file [coroutine/coroutine.rs](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-4/kernel/src/coroutine/coroutine.rs).
+Start by looking at the new file [coroutine/coroutine.rs](kernel/src/coroutine/coroutine.rs).
 Your first task is to implement the functions `coroutine_start()` und `coroutine_switch()`. Since these are `naked`, they may only contain assembly code.
 It is not possible to access Rust variables by their name from within assembly code. All parameters must be read from the corresponding CPU registers.
 All assembly instructions must be entered as strings, separated by commas, inside the `naked_asm!()` macro.
@@ -25,7 +25,7 @@ The state of a coroutine must be saved on the stack. This includes all CPU regis
 
 Afterward, implement the remaining empty methods in `coroutine.rs`. Coroutines are chained together using the `next` field in the `struct Coroutine`.
 
-Test your coroutines by implementing the test functions in the file [demo/lesson4.rs](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-4/kernel/src/demo/lesson4.rs).
+Test your coroutines by implementing the test functions in the file [demo/lesson4.rs](kernel/src/demo/lesson4.rs).
 Your test should create three coroutines that are chained together. Each of them should increment its own counter variable and print it at a fixed position on the screen.
 A coroutine should switch to the next one after each iteration. Because they are chained together, forming a cycle, the coroutines switch in a round-robin fashion, and it looks like the counters are incremented in parallel.
 To set the cursor position, you need to lock the terminal instance temporarily. You should use the macro `print_terminal!()` to print the counter using the locked terminal reference.
@@ -35,7 +35,7 @@ The demo should look like this (the braced numbers show the coroutine IDs):
 
 ![Coroutine Demo](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-4/coroutines.png)
 
-Further information on the coroutine implementation can be found in the [coroutine slides](https://github.com/hhu-bsinfo/HeineOS/blob/main/slides/coroutine.pdf),
+Further information on the coroutine implementation can be found in the [coroutine slides](slides/coroutine.pdf),
 
 ## Assignment 4.2: Queue
 Before we can implement a scheduler for threads, we need to implement a queue.
@@ -44,10 +44,10 @@ When using this for a scheduler, the next thread to be executed is always the on
 
 Implementing a linked list in Rust is challenging, which is why you only need to implement the `remove()` function.
 
-The queue implementation is given in the file [library/queue.rs](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-4/kernel/src/library/queue.rs).
+The queue implementation is given in the file [library/queue.rs](kernel/src/library/queue.rs).
 
 ## Assignment 4.3: From Coroutines to Threads
-Look at the given code in [thread/thread.rs](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-4/kernel/src/thread/thread.rs).
+Look at the given code in [thread/thread.rs](kernel/src/thread/thread.rs).
 It is very similar to the coroutine implementation, and you can copy over most of your code from assignment 4.1.
 You only need to adapt the function names. Notice that the `next` field is missing in the `Thread` struct, since we will manage the threads in a separate queue instead of directly linking them together.
 
@@ -57,7 +57,7 @@ Implement all empty functions in `thread.rs` using your coroutine code. *You can
 In this assigment, you will implement a basic scheduler for threads. All threads are managed in a *ready Queue* (see assignment 4.2) and are switched in a round-robin fashion.
 This is still a cooperative multitasking scheduler, so the threads need to manually yield the CPU to other threads by calling `Scheduler::yield_cpu()`.
 The scheduler will not support priorities or other advanced features. The current thread is always stored in `SchedulerState::active_thread`, while all wating threads are stored in `SchedulerState::ready_queue`.
-The given code also includes an implementation for an [idle thread](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-4/kernel/src/thread/idle_thread.rs), which should always be registered with the scheduler, to ensure that at least one thread is always running.
+The given code also includes an implementation for an [idle thread](kernel/src/thread/idle_thread.rs), which should always be registered with the scheduler, to ensure that at least one thread is always running.
 
 Notice how all methods of the scheduler are called with a const `&self` reference, although they alter the state of the scheduler (e.g., enqueue and dequeue threads from the ready queue).
 This is realized by wrapping the scheduler's variables `ready_queue` and `active_thread` in a separate struct called `SchedulerState` and protecting this with a `Spinlock`.
@@ -67,7 +67,7 @@ This causes a problem with the `yield_cpu()` and `exit()` methods: Usually, the 
 However, in these two functions, we switch to another thread, meaning that we do not return from the function directly and the scheduler state remains locked.
 Any further call to one of the scheduler's methods would result in a deadlock. To prevent this, the assembly code in `thread_start()` and `thread_switch()` must be modified to unlock the spinlock directly after setting the `rsp` register, by calling `unlock_scheduler()`.
 
-Implement the empty functions in [thread/scheduler.rs](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-4/kernel/src/thread/scheduler.rs).
+Implement the empty functions in [thread/scheduler.rs](kernel/src/thread/scheduler.rs).
 When a thread switches via `yield_cpu()`, the currently active thread should be enqueued at the end of the ready queue and the new active thread should be stored in `SchedulerState::active_thread`.
 *Notice that you cannot access the formerly active thread anymore after enqueuing it in the ready queue. Because of this, you should store a pointer to this thread in a local variable, as you need to pass it to `thread_switch()`.*
 

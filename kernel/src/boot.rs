@@ -36,6 +36,8 @@ mod logger;
 mod multiboot;
 mod demo;
 mod interrupt;
+mod coroutine;
+mod thread;
 
 unsafe extern "C" {
     fn load_gdt();
@@ -91,9 +93,9 @@ pub extern "C" fn main(multiboot_magic: u32, multiboot: &multiboot::BootInfo) ->
 
     allocator::global::init_allocator(consts::heap_start(), consts::HEAP_SIZE);
 
-    init_interrupts();
+    //init_interrupts();
 
-    demo::lesson3::keyboard_interrupt_demo();
+    demo::lesson1::text_demo();
 
     // Endless loop, as we cannot return from main().
     loop {}

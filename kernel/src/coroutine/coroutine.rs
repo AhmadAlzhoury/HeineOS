@@ -26,7 +26,23 @@ fn next_id() -> usize {
 #[unsafe(naked)]
 unsafe extern "C" fn coroutine_start(stack_ptr: usize) {
     naked_asm!(
-        // TODO: Implement assembly code for starting a coroutine
+        "mov rsp, rdi",
+        "popfq",
+        "pop rbp",
+        "pop rdi",
+        "pop rsi",
+        "pop rdx",
+        "pop rcx",
+        "pop rbx",
+        "pop rax",
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop r11",
+        "pop r10",
+        "pop r9",
+        "pop r8",
         "ret"
     )
 }
@@ -37,7 +53,40 @@ unsafe extern "C" fn coroutine_start(stack_ptr: usize) {
 #[unsafe(naked)]
 unsafe extern "C" fn coroutine_switch(current_stack_ptr: *mut usize, next_stack: usize) {
     naked_asm!(
-        // TODO: Implement assembly code for switching coroutines
+        "push r8",
+        "push r9",
+        "push r10",
+        "push r11",
+        "push r12",
+        "push r13",
+        "push r14",
+        "push r15",
+        "push rax",
+        "push rbx",
+        "push rcx",
+        "push rdx",
+        "push rsi",
+        "push rdi",
+        "push rbp",
+        "pushfq",
+        "mov [rdi], rsp",
+        "mov rsp, rsi",
+        "popfq",
+        "pop rbp",
+        "pop rdi",
+        "pop rsi",
+        "pop rdx",
+        "pop rcx",
+        "pop rbx",
+        "pop rax",
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop r11",
+        "pop r10",
+        "pop r9",
+        "pop r8",
         "ret"
     )
 }
@@ -77,12 +126,18 @@ impl Coroutine {
     /// Once started, coroutines cannot be exited.
     /// May only be called once.
     pub fn start(&mut self) {
-        todo!("Coroutine::start() is not implemented yet.");
+        assert!(!self.next.is_null(), "Coroutine {} has no successor", self.id);
+        unsafe {
+            coroutine_start(self.stack_ptr);
+        }
     }
 
     /// Switch to the next coroutine.
     pub fn switch(&mut self) {
-        todo!("Coroutine::switch() is not implemented yet.");
+        assert!(!self.next.is_null(), "Coroutine {} has no successor", self.id);
+        unsafe {
+            coroutine_switch(&mut self.stack_ptr, (*self.next).stack_ptr);
+        }
     }
 
     /// Get the id of the coroutine.
@@ -92,7 +147,7 @@ impl Coroutine {
 
     /// Set the next coroutine.
     pub fn set_next(&mut self, next: &mut Coroutine) {
-        todo!("Coroutine::set_next() is not implemented yet.");
+        self.next = ptr::from_mut(next);
     }
 
     /// Prepare the stack of a newly created coroutine in a way that it can be used

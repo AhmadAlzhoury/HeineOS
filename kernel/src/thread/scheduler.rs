@@ -110,12 +110,26 @@ impl Scheduler {
 
     /// Yield the CPU and switch to the next thread in the ready queue.
     pub fn yield_cpu(&self) {
-        todo!("Scheduler::yield_cpu() is not implemented yet.");
+        let mut state = self.state.lock();
+        let Some(next) = state.ready_queue.dequeue() else {
+            return;
+        };
+
+        let mut current = state.active_thread.take().unwrap();
+        let current_ptr = ptr::from_mut(current.as_mut());
+
+        state.ready_queue.enqueue(current);
+        state.active_thread = Some(next);
+
+        unsafe {
+            Thread::switch(current_ptr, state.active_thread.as_mut().unwrap().as_mut());
+        }
     }
 
     /// Kill the thread with the given ID by removing it from the ready queue.
     pub fn kill(&self, to_kill_id: usize) {
-        todo!("Scheduler::kill() is not implemented yet.");
+        let mut state = self.state.lock();
+        state.ready_queue.remove(|thread| thread.id() == to_kill_id);
     }
 }
 
