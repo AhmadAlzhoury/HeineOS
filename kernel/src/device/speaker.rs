@@ -10,6 +10,7 @@
  */
 
 use crate::device::cpu::IoPort;
+use crate::device::pit;
 use crate::library::spinlock::Spinlock;
 
 pub static SPEAKER: Spinlock<Speaker> = Spinlock::new(Speaker::new());
@@ -17,7 +18,6 @@ pub static SPEAKER: Spinlock<Speaker> = Spinlock::new(Speaker::new());
 /// Driver struct for the PC speaker.
 pub struct Speaker {
     pit_ctrl_port: IoPort,
-    pit_data0_port: IoPort,
     pit_data2_port: IoPort,
     ppi_port: IoPort,
 }
@@ -67,7 +67,6 @@ pub const C3: usize = 1046.50 as usize;
 #[repr(u16)]
 /// I/O port addresses for the PC speaker.
 enum SpeakerRegister {
-    Data0 = 0x40,
     Data2 = 0x42,
     Control = 0x43,
     PPI = 0x61,
@@ -81,7 +80,6 @@ impl Speaker {
     pub const fn new() -> Self {
         Speaker {
             pit_ctrl_port: IoPort::new(SpeakerRegister::Control as u16),
-            pit_data0_port: IoPort::new(SpeakerRegister::Data0 as u16),
             pit_data2_port: IoPort::new(SpeakerRegister::Data2 as u16),
             ppi_port: IoPort::new(SpeakerRegister::PPI as u16),
         }
@@ -91,7 +89,7 @@ impl Speaker {
     pub fn play(&mut self, frequency: usize, duration: usize) {
         if frequency == 0 {
             self.off();
-            self.delay(duration);
+            pit::wait(duration);
             return;
         }
 
@@ -104,7 +102,7 @@ impl Speaker {
         }
 
         self.on();
-        self.delay(duration);
+        pit::wait(duration);
         self.off();
     }
 
@@ -122,46 +120,6 @@ impl Speaker {
         unsafe {
             let status = self.ppi_port.inb();
             self.ppi_port.outb(status & !0x03);
-        }
-    }
-
-    /// Return the current value of the PIT counter (16-bit).
-    /// Used by `delay()` to check if the counter has reached 0 or has been reloaded.
-    fn read_counter(&mut self) -> u16 {
-        unsafe {
-            self.pit_ctrl_port.outb(0x00);
-            let low = self.pit_data0_port.inb() as u16;
-            let high = self.pit_data0_port.inb() as u16;
-            (high << 8) | low
-        }
-    }
-
-    /// Wait for a given amount of time in milliseconds using counter 0 of the PIT.
-    /// Mode 2 (rate generator) with a reload value of 1193 (0x04a9) is used.
-    /// This means that the counter will count down from 1193 to 0 and then reload itself.
-    /// Counting from 1193 to 0 takes 1ms.
-    fn delay(&mut self, duration: usize) {
-        if duration == 0 {
-            return;
-        }
-
-        const RELOAD_VALUE: u16 = 1193;
-
-        unsafe {
-            self.pit_ctrl_port.outb(0x34);
-            self.pit_data0_port.outb((RELOAD_VALUE & 0xff) as u8);
-            self.pit_data0_port.outb((RELOAD_VALUE >> 8) as u8);
-        }
-
-        let mut elapsed = 0;
-        let mut previous = self.read_counter();
-
-        while elapsed < duration {
-            let current = self.read_counter();
-            if current > previous {
-                elapsed += 1;
-            }
-            previous = current;
         }
     }
 }
@@ -193,7 +151,7 @@ pub fn tetris() {
     speaker.play(1056, 500);
     speaker.play(880, 500);
     speaker.play(880, 500);
-    speaker.delay(250);
+    pit::wait(250);
     speaker.play(1188, 500);
     speaker.play(1408, 250);
     speaker.play(1760, 500);
@@ -212,7 +170,7 @@ pub fn tetris() {
     speaker.play(1056, 500);
     speaker.play(880, 500);
     speaker.play(880, 500);
-    speaker.delay(500);
+    pit::wait(500);
     speaker.play(1320, 500);
     speaker.play(990, 250);
     speaker.play(1056, 250);
@@ -234,7 +192,7 @@ pub fn tetris() {
     speaker.play(1056, 500);
     speaker.play(880, 500);
     speaker.play(880, 500);
-    speaker.delay(250);
+    pit::wait(250);
     speaker.play(1188, 500);
     speaker.play(1408, 250);
     speaker.play(1760, 500);
@@ -253,7 +211,7 @@ pub fn tetris() {
     speaker.play(1056, 500);
     speaker.play(880, 500);
     speaker.play(880, 500);
-    speaker.delay(500);
+    pit::wait(500);
     speaker.play(660, 1000);
     speaker.play(528, 1000);
     speaker.play(594, 1000);

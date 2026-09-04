@@ -93,9 +93,9 @@ pub extern "C" fn main(multiboot_magic: u32, multiboot: &multiboot::BootInfo) ->
 
     allocator::global::init_allocator(consts::heap_start(), consts::HEAP_SIZE);
 
-    //init_interrupts();
+    init_interrupts();
 
-    demo::lesson1::text_demo();
+    demo::lesson5::thread_demo();
 
     // Endless loop, as we cannot return from main().
     loop {}
@@ -125,7 +125,7 @@ fn configure_kernel_options(multiboot: &multiboot::BootInfo) {
                 if log_level.is_none() {
                     warn!("Ignoring invalid log level '{}'", value);
                 }
-            },
+            }
             "log_to_terminal" => match value {
                 "true" => terminal_logging = Some(true),
                 "false" => terminal_logging = Some(false),
@@ -162,6 +162,7 @@ fn init_interrupts() {
     interrupt::idt::idt().load();
     device::pic::PIC.lock().init();
     device::keyboard::plugin();
+    device::pit::plugin();
     device::cpu::enable_int();
 }
 

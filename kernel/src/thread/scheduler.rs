@@ -39,11 +39,14 @@ pub unsafe extern "C" fn unlock_scheduler() {
 }
 
 /// The state of the scheduler.
-/// It contains the active thread and the ready queue with all other threads.
+/// It contains the active thread, the ready queue with all other threads,
+/// and a queue of terminated threads waiting for cleanup.
 /// The state is contained in its own struct so that it can be locked via a mutex.
 struct SchedulerState {
+    initialized: bool,
     active_thread: Option<Box<Thread>>,
-    ready_queue: LinkedQueue<Box<Thread>>
+    ready_queue: LinkedQueue<Box<Thread>>,
+    terminated_threads: LinkedQueue<Box<Thread>>,
 }
 
 /// Represents the scheduler.
@@ -57,8 +60,10 @@ impl Scheduler {
     /// and an idle thread as the active thread.
     pub fn new() -> Self {
         let state = SchedulerState {
+            initialized: false,
             active_thread: Some(Thread::new(idle_thread)),
             ready_queue: LinkedQueue::new(),
+            terminated_threads: LinkedQueue::new(),
         };
 
         Scheduler { state: Spinlock::new(state) }
@@ -75,6 +80,8 @@ impl Scheduler {
     /// This function must only be called once.
     pub fn schedule(&self) {
         let mut state = self.state.lock();
+
+        state.initialized = true;
 
         // The active thread is never None, since we must at least have the idle thread.
         state.active_thread.as_mut().unwrap().start();
@@ -93,24 +100,57 @@ impl Scheduler {
 
         // The active thread is never None, since we must at least have the idle thread.
         let mut current = state.active_thread.take().unwrap();
+        let current_ptr = ptr::from_mut(current.as_mut());
         // The idle thread never exits, so there must be at least one thread in the queue.
         let next = state.ready_queue.dequeue().unwrap();
 
-        // Set the dequeued thread as the active thread,
-        // overwriting the current one, which we want to exit.
+        // Keep ownership of the current thread until the idle thread can safely
+        // free its resources after switching to a different stack.
+        state.terminated_threads.enqueue(current);
         state.active_thread = Some(next);
 
         unsafe {
             // Switch to the next thread.
-            // `current` still contains the old thread we want to exit,
+            // `terminated_threads` contains the old thread we want to exit,
             // while `state.active_thread` contains the next one.
-            Thread::switch(current.as_mut(), state.active_thread.as_mut().unwrap().as_mut());
+            Thread::switch(current_ptr, state.active_thread.as_mut().unwrap().as_mut());
+        }
+    }
+
+    /// Free the resources of all terminated threads.
+    ///
+    /// Each thread is removed while the scheduler state is locked, but dropped
+    /// only after releasing that lock because dropping its stack invokes the
+    /// global allocator.
+    pub fn cleanup_terminated_threads(&self) {
+        loop {
+            let terminated_thread = {
+                let mut state = self.state.lock();
+                state.terminated_threads.dequeue()
+            };
+
+            let Some(terminated_thread) = terminated_thread else {
+                return;
+            };
+
+            drop(terminated_thread);
         }
     }
 
     /// Yield the CPU and switch to the next thread in the ready queue.
     pub fn yield_cpu(&self) {
-        let mut state = self.state.lock();
+        if allocator::global::is_allocator_locked() {
+            return;
+        }
+
+        let Some(mut state) = self.state.try_lock() else {
+            return;
+        };
+
+        if !state.initialized {
+            return;
+        }
+
         let Some(next) = state.ready_queue.dequeue() else {
             return;
         };

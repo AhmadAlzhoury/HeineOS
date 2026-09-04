@@ -14,6 +14,7 @@ use crate::thread::scheduler::scheduler;
 /// This function is run in its own thread to ensure that the scheduler always has at least one thread running.
 pub fn idle_thread() {
     loop {
+        scheduler().cleanup_terminated_threads();
         scheduler().yield_cpu();
     }
 }

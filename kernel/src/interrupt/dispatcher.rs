@@ -81,7 +81,11 @@ pub unsafe fn unlock_int_vectors() {
 /// The main interrupt dispatcher.
 /// Every interrupt is routed here, if not specified otherwise in the IDT.
 pub fn dispatch_interrupt(vector: u8, stack_frame: InterruptStackFrame, error_code: Option<u64>) {
-    log::debug!("Handling interrupt vector {}", vector);
+    // Logging every PIT tick is prohibitively expensive
+    // sound playing is noticeably slower with logging enabled for PIT interrupts
+    if vector != InterruptVector::Pit as u8 {
+        log::debug!("Handling interrupt vector {}", vector);
+    }
 
     if !INT_VECTORS.lock().report(vector) {
         panic!("No ISR registered for interrupt vector {}", vector);

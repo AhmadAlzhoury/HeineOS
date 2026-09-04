@@ -89,19 +89,7 @@ pub fn speaker_demo() {
     println!("===============");
     println!("Playing a scale...");
 
-    let mut speaker = SPEAKER.lock();
-    for frequency in [
-        speaker::C1,
-        speaker::D1,
-        speaker::E1,
-        speaker::F1,
-        speaker::G1,
-        speaker::A1,
-        speaker::B1,
-        speaker::C2,
-    ] {
-        speaker.play(frequency, 250);
-    }
+    speaker::tetris();
 
     println!("Done.");
 }

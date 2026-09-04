@@ -7,7 +7,7 @@
 
 ## Assignment 5.1: Programmable Interval Timer (PIT)
 From now on, we will use the PIT to implement a system timer and automatically switch between threads at a fixed interval.
-The system time is stored in the variable `SYSTEM_TIME` (in [pit.rs](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-5/kernel/src/device/pit.rs)) and should increment every time the PIT triggers an interrupt.
+The system time is stored in the variable `SYSTEM_TIME` (in [pit.rs](kernel/src/device/pit.rs)) and should increment every time the PIT triggers an interrupt.
 Use the PIT's counter 0 and mode 3 and load the counter with a suitable value so that the PIT triggers an interrupt every millisecond.
 This way, `SYSTEM_TIME` shows how many ticks (i.e., milliseconds) have passed since the timer has been started.
 
