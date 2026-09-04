@@ -1,155 +1,223 @@
-# Aufgabe 5: Preemptive Multithreading
+# Lesson 6: Filesystem & Porting a Game Boy Emulator
 
 ## Learning Goals
-1. Understand how preemptive multithreading works
-2. Automatically yield the CPU in a fixed interval using the PIT
-3. Avoid deadlocks in preemptive multithreading
+1. Implement a basic read-only filesystem
+2. Learn how to parse and display bitmap files
+3. Port a Game Boy emulator (Peanut-GB) to HeineOS that can load a ROM image from the filesystem
 
-## Assignment 5.1: Programmable Interval Timer (PIT)
-From now on, we will use the PIT to implement a system timer and automatically switch between threads at a fixed interval.
-The system time is stored in the variable `SYSTEM_TIME` (in [pit.rs](kernel/src/device/pit.rs)) and should increment every time the PIT triggers an interrupt.
-Use the PIT's counter 0 and mode 3 and load the counter with a suitable value so that the PIT triggers an interrupt every millisecond.
-This way, `SYSTEM_TIME` shows how many ticks (i.e., milliseconds) have passed since the timer has been started.
+## Slides for this assignment
+- Lecture 7: [Filesystem](https://github.com/hhu-bsinfo/HeineOS/blob/main/slides/lecture7_filesystem.pdf)
 
-Furthermore, the system time should be visualized on the screen using a rotating spinner.
-Use the signs `| / - \` (given in `SPINNER_CHARS`) and change the current sign at a fixed interval (e.g., every 250 ms).
-The current sign should be displayed at a fixed position on the screen (e.g., on the right upper corner).
-To draw the spinner, you can access the framebuffer via `terminal::framebuffer()`.
-However, you need to lock the framebuffer instance before you can draw to it.
-This is a potential source for a deadlock, since we are currently inside an interrupt handler.
-To avoid this, use `try_lock()` and only draw the spinner if the lock can be acquired.
+## Assignment 6.1: Filesystem
+In this assignment, you will implement a basic read-only filesystem.
+To get files into the system, we use the bootloader's ability to load *modules* into memory besides the kernel.
+A module can be any arbitrary file and must be bundled inside the OS image.
+The bootloader allocates memory for the file and loads it there. The allocated address is passed to the kernel via the [Multiboot2](https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html) protocol.
 
-![System Time Spinner](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-5/spinner.gif)
+We use a TAR archive as a module. This way, we can easily bundle multiple files into a single module.
+Other operating systems use similar techniques, bundling multiple files required for booting into a single archive.
+This archive is oftentimes called an *initrd* (initial ram disk).
+Our initrd is built automatically during the build process from the contents of the `initrd` directory.
+The final TAR archive is stored in the `loader` directory as `initrd.tar` and included in the OS image `HeineOS.img` together with the kernel.
 
-Finally, implement `pit::plugin()` to initialize the PIT using `TIMER.init(|| { ... })`, set the interrupt interval and register the interrupt in `interrupt/dispatcher.rs`.
-Additionally, the PIT interrupts should be allowed in the PIC. Call `pit::plugin()` in `startup.rs` to start the timer.
+We use the crate [tar-no-std](https://lib.rs/crates/tar-no-std) to parse the TAR archive and access the files it contains.
+The filesystem code is located in the [filesystem/tarfs.rs](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-6/kernel/src/filesystem/tarfs.rs).
 
-If you want to, you can now use the system time in your log messages, printing it, for example, at the beginning of each message.
+As a first step, you should find the initial ramdisk in memory and initialize the filesystem with it.
+Start by searching for the initrd in `boot.rs` using `multiboot.find_tag::<multiboot::ModuleTag>(multiboot::TagType::Module)`.
+If a module is found, you can call `as_slice()` to get its contents as a slice of bytes.
+This can then be used to create a `TarArchiveRef` object, which is need to initialize the filesystem with `tarfs::init_filesystem()`.
 
-## Assignment 5.2: Waiting using the System Time
-Now that we have an incrementing system time, we can use it to implement a waiting function.
-The function `pit::wait(ms: usize)` should loop until the given number of milliseconds has passed.
+Now, implement the empty functions in `tarfs.rs` to make the filesystem work.
+Start with `TarFs::open()`, which should search the tar archive for a file at the given path.
+The `TarArchiveRef` struct provides an iterator over all files in the archive via its `entries()` function.
+The name of each file is already its full path, so you should easily be able to find the file you are looking for.
+If the file is found, a `FileHandle`, which is just a unique identifier for accessing the file, should be created and returned.
+Furthermore, an `OpenFile` instance must be created, referencing the entry in the tar archive and the current read position (initially 0).
+The caller can use the returned handle to access the file using `TarFs::read()`, `TarFs::seek()` and `TarFs::size()`. Calling `TarFs::close()` should invalidate the handle (i.e., remove it from the internal map of open files).
 
-To test your implementation, replace all `delay()` calls in the PC speaker driver with `pit::wait()`.
-The `delay()` function cannot be used anymore, since it programs the PIT directly using its counter 0, which would interfere with our system time.
+Next, implement the remaining filesystem functions.
+Reading a file should copy its contents into the provided buffer, respecting the read position and also updating the read position depending on the number of bytes read.
+Seeking a file updates the read position of the appropriate `OpenFile` instance.
 
-Playing the builtin melodies should work as before when using `pit::wait()` instead of `delay()`.
+Finally, test your implementation by reading a simple text file from the filesystem and printing its contents to the screen.
 
-## Assignment 5.3: Switching Threads using the PIT
-In this assignment, the PIT interrupt will be used to switch threads at a fixed interval.
+![Filesystem overview](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-6/tarfs.png)
 
-Start by adding a new instance variable to `SchedulerState` called `initialized` to indicate whether the scheduler is already running.
-It should set to `false` initially and switched to `true` in `Scheduler::schedule()` (directly before the first thread is started).
+## Assignment 6.2: Bitmap Images
+Now that we have a working filesystem, we have a way to get useful files into the system.
+In this assignment, you will implement a basic bitmap image loader, which enables you to display a bitmap image on the screen.
+This is, for example, useful for game development, as bitmap images are often used to represent sprites.
 
-In `Scheduler::yield_cpu()`, you should now check whether the scheduler is already running and only switch threads if so.
-Furthermore, we must make sure to not cause a deadlock when locking `Scheduler::state`.
-This can happen, if the pit interrupt is triggered and initiates a thread switch, while `Scheduler::state` is locked.
-In this case, the system would get stuck at acquiring the lock and never return from the interrupt.
-Use `try_lock()` to check whether the lock can be acquired and return if it cannot.  
-There is still one potential deadlock left: As the scheduler modifies the thread queue in `yield_cpu()`, the allocator is invoked.
-If the allocator is currently locked while the pit triggers a thread switch, we also run into a deadlock.
-To avoid this, check whether the allocator is currently locked in `yield_cpu()`, using `allocator::global::is_allocator_locked()` and only switch threads if it returns `false`.
+The given code in [library/bitmap.rs](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-6/kernel/src/filesystem/tarfs.rs) already contains all necessary structs.
+You only need to implement the function `Bitmap::from_bytes()` to parse a bitmap file from a slice of bytes.
+A detailed description of the BMP file format can be found on [Wikipedia](https://en.wikipedia.org/wiki/BMP_file_format).
+It is enough to support simple Windows BMP files with 24-bit color depth and no compression.
+You can use the provided `color()` function to convert the extracted 8-bit color values to a 32-bit color value, compatible with the framebuffer.
+Be aware that each row of pixel data is padded to a 4-byte boundary.
 
-Once you have modified the scheduler, call `Scheduler::yield_cpu()` in the PIT's interrupt handler at a fixed interval.
-Every 10 ms is a good choice. Smaller values will slow down the system, as more time is spent in the scheduler.
-Too large values can cause the system to be unresponsive, as threads are not switched quickly enough.
-You are, of course, free to experiment with different values and see how the system behaves.
+To be able to display the bitmap image, implement the function `Framebuffer::draw_bitmap()`.
+As the color data is already in the correct format, you can copy the pixel data to the framebuffer, row by row.
 
-Finally, there is one deadlock left that we must fix:
-Every interrupt is first handled by `dispatch_interrupt()` in `interrupt/dispatcher.rs`, which locks `INT_VECTORS`.
-The lock is automatically released after the interrupt handler returns.
-However, if the PIT switches threads, we directly return into the next thread from within the PIT's interrupt handler.
-Because of this, the lock protecting `INT_VECTORS` is not released.
-To fix this, we must call `interrupt::dispatcher::unlock_int_vectors()` before calling `Scheduler::yield_cpu()` inside the PIT's interrupt handler.
-This force unlocks `INT_VECTORS`, which would usually be highly unsafe. But since we only do this inside an interrupt handler, which cannot be interrupted, it is safe (although somewhat ugly).
+The initrd already contains a bitmap image file called [heine.bmp](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-6/initrd/heine.bmp), that you can use to test your implementation.
 
-## Assignment 5.4: Preemptive Multithreading Demo
-Test your implementation with the multithreading demo from assignment 4.5.
-However, remove the `yield_cpu()` call, since we now want to check whether preemptive multithreading works.
-Furthermore, an additional thread should be spawned that plays a melody via the PC speaker.
+![HeineOS showing a bitmap image](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-6/bitmap.png)
 
-You will probably notice the following behavior:
-1. Primarily, only one thread outputs its counter. Only occasionally, we can observe a switch to another thread.
-2. Nevertheless, the PC speaker plays a melody, which means that scheduler must be working correctly.
-3. The system time spinner seems to be updated irregularly.
+## Assignment 6.3: Porting a Game Boy Emulator
+[Peanut-GB](https://github.com/deltabeard/Peanut-GB) is a Game Boy emulator written in pure C.
+The whole code is contained in a single header file, making it easy to port to different platforms.
+In this assignment, you will port Peanut-GB to HeineOS, using the filesystem to load a ROM image and the framebuffer to display the game screen.
 
-This behavior is caused by the fact that our threads all need to acquire a lock on the terminal, which in turn also locks the framebuffer when drawing characters.
-Since our demo threads spent most of their time printing to the screen, there is only a tiny time window during which the terminal (and the framebuffer) is not locked.
-Because of this, the thread that first acquires the terminal lock keeps it for a long time, as the probability of a thread switch at the exact (short) moment when it releases the lock is only small.
-This causes the other two threads to *starve* and is also the reason the system time spinner is drawn less frequently, as the PIT's interrupt handler cannot acquire the lock most of the time.
+For testing purposes, the ROM file `2048.gb` is already included in the initrd in the `roms` directory.
+This is an open source reimplementation of the popular game 2048. The source is available on [GitHub](https://github.com/Sanqui/2048-gb).
+We will not provide any proprietary ROM files, as they are copyrighted by their creators.
+However, the emulator is able to play any ROM file that is compatible with the original Game Boy.
 
-Try inserting a `pit::wait(100)` call after each time the thread outputs its counter (and the terminal lock is released).
-You should now see all three threads output their counter, albeit very slowly.
-This works, because now the probability of a thread switch while the thread is inside `pit::wait()` is much higher than while it holds the terminal lock.
-However, this is not a good solution, since it wastes a lot of computation time.
-A better solution would be, to manually call `scheduler::yield_cpu()` every few iterations (e.g., 10).
+Start by looking at the code in [demo/lesson6/peanut-gb.rs](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-6/kernel/src/demo/lesson6/peanut_gb.rs).
+It begins with declarations for functions that are implemented in the C code. By declaring them as `extern "C"` here, we can call them from Rust.
+Notice how parameters and return values have special types, corresponding to the C types (e.g., `c_int`, `c_long`, `c_void`).
 
-In general, this demo is pathological for such kind of behavior.
-In real-world scenarios, there would be much more computation done besides drawing to the screen.
-However, it shows the pitfalls we have to be aware of when using preemptive multithreading.
+Further down in the file, you will find more functions marked as `extern "C"`, containing *TODO* comments.
+These are functions that are called from the C code but implemented in Rust.
 
-Finally, calling `Scheduler::kill()` is not a good idea in a preemptive environment.
-If we kill a thread while it holds a lock, the lock will never be released.
-For this reason, you do not need to kill threads anymore in the demo. Instead, let them exit when their counter reaches a certain value.
+While it is easy to call C functions from Rust, and vice versa, the case looks different for structs and enums.
+If C code defines a struct that we need to use in Rust, we have no choice but to also declare it in Rust (the same applies to enums).
+Rust provides the `#[repr(C)]` attribute to tell the compiler that a struct or enum should look exactly as if it was defined in C, when compiled.
+The provided code already defines the enums `GbError` and `GbInitError`, corresponding the error code enums returned by the C functions.  
+However, the most important struct used by the C code is the `gb_s` struct, which contains the entire emulator state.
+Redeclaring it in Rust would be a lot of work. Fortunately, we can work around this, as the C functions only want a pointer to the struct as a parameter.
+We only need to allocate memory for it and pass a pointer to it to the C code. Notice, how the function declaratations in Rust use the `c_void` type for the struct pointer.
+The size of the struct is provided by the C function `gb_size()` in [demo/lesson6/peanut-gb.c](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-6/kernel/src/demo/lesson6/peanut_gb.c).  
+The only time when we need to access a field of the struct is when passing joypad button states to the C code.
+For this purpose, the function `gb_get_joypad_ptr()` in `peanut_gb.c` returns a pointer to the joypad state field of the passed struct.
+This is an 8-bit wide field, where each bit corresponds to a button of the Game Boy's joypad.
+Setting a bit to 1 means that the corresponding button is not pressed, while setting a bit to 0 means that the button is pressed.
 
-Your demo should now look like this:
+Before starting implementing the emulator, make sure to replace your old `kernel/Makefile.toml`, with the one provided in this assignment.
+The new file contains additional build tasks for compiling the C code.
 
-![Thread Demo](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-5/threads.gif)
+Your main task is to implement the `play()` function.
+Start by loading the ROM file's content from the given path into the static variable `ROM`.
+Next, allocate a memory for the `gb_s` struct. You can use `Vec::<u8>::with_capacity()` to allocate a buffer of the correct size.
+A pointer to the `Vec`'s data can be acquired by calling `Vec::as_mut_ptr()`.
+Now, call the C function `gb_init()` to initialize the emulator, passing the pointer to the struct, as well as the corresponding function pointers.
 
-## Assignment 5.5: Freeing Thread Resources
-Each thread allocates its stack on the heap. This should be freed automatically when the thread's lifetime ends.
-Look at `Scheduler::exit()`: The thread that terminates is taken out of `SchedulerState::active_thread` and **not** inserted into `SchedulerState::ready_queue`.
-Usually, the thread should now automatically be dropped (deallocating its stack) once `Scheduler::exit()` returns.
-In fact, the compiler inserts the `drop()` call at the end of `Scheduler::exit()`, but since we call `Thread::switch()` beforehand, the implicit `drop()` call is never executed.
+As a first test of your implementation, you can now add a log message to `gb_rom_read()`, logging the read address and call `gb_run_frame()` in an infinite loop after the emulator has been initialized.
+If you run the emulator, you should see your log message appear a few times in the terminal, before the emulator panics because of a checksum error:
 
-A first attempt at fixing this, might be to call `drop()` manually on the thread before calling `Thread::switch()`.
-However, there are two problems with this approach:
-1. We still need the thread instance during `Thread::switch()`.
-2. During the `drop()` call, the heap allocator will get locked. If it was already locked before, we run into a deadlock because the scheduler state is also currently locked, preventing any other thread switches.
+```text
+[1.259][DBG][peanut_gb.rs@168] ROM read at 0x0134
+[1.259][DBG][peanut_gb.rs@168] ROM read at 0x0135
+[1.259][DBG][peanut_gb.rs@168] ROM read at 0x0136
+[1.259][DBG][peanut_gb.rs@168] ROM read at 0x0137
+[1.259][DBG][peanut_gb.rs@168] ROM read at 0x0138
+[1.260][DBG][peanut_gb.rs@168] ROM read at 0x0139
+[1.260][DBG][peanut_gb.rs@168] ROM read at 0x013a
+[1.260][DBG][peanut_gb.rs@168] ROM read at 0x013b
+[1.260][DBG][peanut_gb.rs@168] ROM read at 0x013c
+[1.260][DBG][peanut_gb.rs@168] ROM read at 0x013d
+[1.260][DBG][peanut_gb.rs@168] ROM read at 0x013e
+[1.260][DBG][peanut_gb.rs@168] ROM read at 0x013f
+[1.261][DBG][peanut_gb.rs@168] ROM read at 0x0140
+[1.261][DBG][peanut_gb.rs@168] ROM read at 0x0141
+[1.261][DBG][peanut_gb.rs@168] ROM read at 0x0142
+[1.261][DBG][peanut_gb.rs@168] ROM read at 0x0143
+[1.261][DBG][peanut_gb.rs@168] ROM read at 0x0144
+[1.261][DBG][peanut_gb.rs@168] ROM read at 0x0145
+[1.261][DBG][peanut_gb.rs@168] ROM read at 0x0146
+[1.262][DBG][peanut_gb.rs@168] ROM read at 0x0147
+[1.262][DBG][peanut_gb.rs@168] ROM read at 0x0148
+[1.262][DBG][peanut_gb.rs@168] ROM read at 0x0149
+[1.262][DBG][peanut_gb.rs@168] ROM read at 0x014a
+[1.262][DBG][peanut_gb.rs@168] ROM read at 0x014b
+[1.262][DBG][peanut_gb.rs@168] ROM read at 0x014c
+[1.262][DBG][peanut_gb.rs@168] ROM read at 0x014d
+[1.263][ERR][boot.rs@258] Kernel panic: panicked at kernel/src/demo/lesson6/peanut_gb.rs:257:13:
+Failed to initialize PeanutGB (Error: InvalidChecksum)
 
-To work around these problems, you should introduce a second queue to `SchedulerState` called `terminated_threads`.
-In `Scheduler::exit()`, the terminated thread should be inserted into this queue before calling `Thread::switch()`.
-This way, all terminated threads are gathered in one place with `terminated_threads` having the ownership of all the instances.  
-Now, implement a new function `cleanup_terminated_threads()` in the scheduler that dequeues all threads from `SchedulerState::terminated_threads`, thus freeing their resources.
-Note that you do not need to call `drop()` on the threads, just dequeuing them is enough, as Rust will automatically drop them once they have no owner anymore.
-Finally, use the idle thread to call `cleanup_terminated_threads()` regularly.
-
-## Optional Assignment: Performance Optimizations
-In this optional assignment, we will tune some parts of the code to improve the performance of our operating system.
-
-### Waste less time when waiting
-As a first step, yield the CPU manually while waiting in `pit::wait()`.
-This way, the CPU spends less time spinning in the wait loop but rather switches to other threads.
-
-### More efficient locks
-The same applies for our `Spinlock`. Manually switch to next thread while the lock cannot be acquired in `Spinlock::lock()`.
-This should greatly improve the performance of our thread demo.
-
-To see the performance improvements, you can measure the time it takes each thread to count to a specific value (e.g., 1000)
-Store the system time before entering the loop in a variable. Then use it to calculate the time it took to count to the desired value.
-Print the time it took for each thread at the end of the loop.
-
-Now start the demo one time without the optimized `Spinlock` and one time with the optimizations applied.
-In my testing, I could see a 3x performance improvement for the thread demo.
-
-| Without optimized Spinlock                                                                                                                                 | With optimized Spinlock                                                                                                                               |
-|------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
-| ![Thread Demo Without Spinlock Optimizations](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-5/threads_unoptimized.png) | ![Thread Demo With Spinlock Optimizations](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-5/threads_optimized.png) |
-
-
-### Compiler optimizations
-Until now, we have used *debug* build to test our system. In such builds, the compiler does not optimize the code as much as it does in *release* builds.
-You can use the following command to enable compiler optimization:
-
-```shell
-cargo make --no-workspace --profile production qemu
 ```
 
-This should significantly improve the performance of our system. However, be aware that you cannot debug release builds.
-Use debug builds during development and for fixing problems and release builds to test the final system.
+Implement `gb_rom_read()` to return the correct byte of the ROM file and run the emulator again.
+The emulator should now run without errors, and you should see an infinite stream of log messages in your terminal.
+The ROM is now actually played by the emulator, we just do not see anything on the screen yet.
 
-While it took the demo threads around 7 seconds to count to 1000 in my testing before, they now count to 150000 in roughly the same time.
-This is a huge performance improvement of 150x just by enabling compiler optimizations.
-As you will see, especially drawing to the screen is now much faster, and it is highly recommended to test your system with compiler optimizations enabled during the next assignments.
+To display the game screen, implement the function `lcd_draw_line()`.
+This function is called by the emulator's C code for each line of the screen.
+The emulator provides a pointer to the line's data, which is an array of 160 bytes.
+We only need to look at the first two bits of each byte, as the original Game Boy can only display four colors (or better, four shades of gray).
+The provided code already includes a color palette with the `PALETTE` constant. You can use the 2-bit color values as indices into the palette.
+After implementing this function, make sure to call `gb_init_lcd()` before entering the infinite loop in `play()`.
+Furthermore, remove the log message from `gb_rom_read()`, as it significantly slows down the emulator.
+You should now see the game's title screen.
 
-![Thread Demo With Compiler Optimizations](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-5/threads_release.png)
+![Peanut-GB Screenshot](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-6/gameboy1.png)
+
+Next, we should make sure that the emulator runs at the correct speed.
+We want it to run at 60 Hz, so we need to call `gb_run_frame()` 60 times per second.
+Use `pit::system_time()` to measure the time taken by the last call to `gb_run_frame()` and calculate the time to wait until the next frame should be drawn.
+Use `pit::wait()` to wait for the calculated time. The desired frame time is already provided in the `MS_PER_FRAME` constant.
+
+Finally, only user input is missing. Check if the user has pressed a key using `KeyEventQueue::pop_key_event()` in every iteration of the loop.
+If a key has been pressed or released, and it corresponds to a button of the Game Boy's joypad, set/unset the corresponding bit in the emulator's joypad state.
+
+You should now be able to run the emulator and play the game! However, when running a debug build of HeineOS, performance is probably very slow.
+Try running a release build instead by using `cargo make --no-workspace --profile production qemu`, as explained in the optional assignment of [Lesson 5](https://github.com/hhu-bsinfo/HeineOS/tree/lesson-5).
+This way, full emulation speed should be achievable (depending on your hardware).
+
+If you like, you can scale the game screen by 2x or even 4x, so it is not displayed so tiny anymore.
+To do this, you only need to adapt the `lcd_draw_line()` function.
+Here is a screenshot with 2x scaling and the Game Boy screen centered in the framebuffer:
+
+![Peanut-GB Screenshot](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-6/gameboy2.png)
+
+## Optional Assignment: Save Games
+Many Game Boy Games include a small amount of battery-backed RAM, which is used to store game progress.
+A few games (e.g., Pokémon) also use this RAM for some of their sprites, so these only work correctly if the RAM is also emulated.
+
+Emulating the RAM is pretty easy, as you just need to implement the functions `gb_cart_ram_read()` and `gb_cart_ram_write()`.
+Start by adding a new static variable, holding a `Vec` protected by a `Spinlock`. This `Vec` will contain the contents of the RAM.
+In your `play()` function, call `gb_get_save_size_s()` after calling `gb_init()` to get the size of the RAM.
+Notice that `gb_get_save_size_s()` does not return the size directly, but wants a pointer to a `c_size_t` variable.
+It writes the size into this variable and returns an error code (0 on success).
+Initialize the RAM `Vec` with the correct number of zeros.
+
+The `c_size_t` type is still experimental in Rust and must be enabled manually.
+Add the following line to the top of your `boot.rs` file:
+
+```rust
+#![feature(c_size_t)]
+```
+
+That's it, in theory. The RAM is now emulated, but it is not very useful yet.
+We need a way to save the contents of the RAM to a file that can be loaded when starting the game again.
+HeineOS does not support writing files, but we can make use of the serial port to export the contents of the RAM to a file on the host computer.
+
+First, add two new arguments to QEMU in your `Makefile.toml`:
+
+```text
+"-serial", "none",
+"-serial", "file:gameboy.sav",
+```
+
+You should now pass three `-serial` arguments to QEMU in total, each of which causes QEMU to emulate an additional serial port.
+Our operating system uses the first serial port for logging.
+The UEFI BIOS uses the second serial port, also for logging purposes.
+The third serial port is not used at all until now, so we can safely use it for saving the contents of the RAM.
+As you can see in the arguments above, QEMU will write all data written to the third serial port to a file called `gameboy.sav`.
+
+Next, add a new global variable to `device/serial.rs`, used to access the third serial port:
+
+```rust
+pub static COM3: Spinlock<ComPort> = Spinlock::new(ComPort::new(ComBaseAddress::Com3));
+```
+
+Now, we need a way to exit the emulation loop so that we can write the contents of the RAM to the file after the user exits the game.
+Check if the user has pressed the `Escape` key and break out of the loop if this is the case.
+At the end of the `play()` function, iterate over all bytes in the RAM and write them to the serial port one by one.
+
+You should now see the file `gameboy.sav` on your host computer.
+Check its size to make sure that the save data has actually been written to it.
+Copy the file to `initrd/roms/`. In your `play()` function, you can now load the save file in addition to the ROM file.
+Copy the contents of the save file to your RAM `Vec` before entering the emulation loop.
+To make sure, that the initrd is definitely rebuilt with the new file, you can delete `loader/initrd.img` and `HeineOS.img` before restarting.
+The game should now see the contents of the save file in its RAM, allowing the user to save and load game progress (if supported by the game).
