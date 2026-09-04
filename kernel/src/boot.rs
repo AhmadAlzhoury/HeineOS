@@ -38,6 +38,7 @@ mod demo;
 mod interrupt;
 mod coroutine;
 mod thread;
+mod filesystem;
 
 unsafe extern "C" {
     fn load_gdt();
