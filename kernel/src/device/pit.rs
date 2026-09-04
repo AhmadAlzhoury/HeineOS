@@ -15,7 +15,7 @@ use crate::device::terminal;
 use crate::interrupt::dispatcher::{IntVectors, InterruptVector};
 use crate::interrupt::isr::ISR;
 use crate::library::once::Once;
-use crate::thread::scheduler::scheduler;
+use crate::thread::scheduler::{scheduler, yield_cpu_if_initialized};
 
 /// Get the current system time in milliseconds.
 pub fn system_time() -> usize {
@@ -26,6 +26,7 @@ pub fn system_time() -> usize {
 pub fn wait(ms: usize) {
     let start_time = system_time();
     while system_time().wrapping_sub(start_time) < ms {
+        yield_cpu_if_initialized();
         core::hint::spin_loop();
     }
 }

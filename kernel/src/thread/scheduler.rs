@@ -11,6 +11,7 @@ use alloc::boxed::Box;
 use core::fmt::Display;
 use core::{fmt, ptr};
 use crate::allocator;
+use crate::device::cpu;
 use crate::library::once::Once;
 use crate::library::queue::LinkedQueue;
 use crate::library::spinlock::Spinlock;
@@ -23,6 +24,18 @@ static SCHEDULER: Once<Scheduler> = Once::new();
 /// Global access to the scheduler.
 pub fn scheduler() -> &'static Scheduler {
     SCHEDULER.init(Scheduler::new)
+}
+
+/// Yield the CPU if the global scheduler has already been initialized.
+/// This avoids initializing the scheduler from low-level code such as a spinlock.
+pub fn yield_cpu_if_initialized() {
+    if !cpu::is_int_enabled() {
+        return;
+    }
+
+    if let Some(scheduler) = SCHEDULER.get() {
+        scheduler.yield_cpu();
+    }
 }
 
 /// Unlock the scheduler state.

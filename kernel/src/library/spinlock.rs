@@ -9,6 +9,7 @@
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
+use crate::thread::scheduler::yield_cpu_if_initialized;
 
 /// A simple spinlock implementation that spins in a loop until it acquires the lock.
 /// It uses an atomic boolean to represent the lock state.
@@ -43,13 +44,14 @@ impl<T> Spinlock<T> {
         }
     }
 
-    /// Spin until the lock is acquired, then return a guard that allows access to the data.
+    /// Yield the CPU while waiting for the lock, then return a guard that allows access to the data.
     pub fn lock(&'_ self) -> SpinlockGuard<'_, T> {
         loop {
             if let Some(guard) = self.try_lock() {
                 return guard;
             }
 
+            yield_cpu_if_initialized();
             core::hint::spin_loop();
         }
     }
@@ -60,17 +62,17 @@ impl<T> Spinlock<T> {
     fn unlock(&self) {
         self.lock.store(false, Ordering::Release);
     }
-    
+
     /// Check if the spinlock is currently locked.
     pub fn is_locked(&self) -> bool {
         self.lock.load(Ordering::Acquire)
     }
-    
+
     /// Forcefully unlock the spinlock. This should only be used in exceptional cases.
     pub unsafe fn force_unlock(&self) {
         self.unlock();
     }
-    
+
     /// Get a reference to the inner data without locking.
     /// This is unsafe because it can lead to data races if the spinlock is not held
     /// and should only be used in exceptional cases.
@@ -89,7 +91,7 @@ impl<'a, T> Deref for SpinlockGuard<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { 
+        unsafe {
             self.lock.data.get().as_ref().unwrap()
         }
     }
@@ -97,7 +99,7 @@ impl<'a, T> Deref for SpinlockGuard<'a, T> {
 
 impl<'a, T> DerefMut for SpinlockGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { 
+        unsafe {
             self.lock.data.get().as_mut().unwrap()
         }
     }

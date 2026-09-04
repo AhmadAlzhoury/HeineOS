@@ -10,6 +10,7 @@ use log::info;
 use crate::device::speaker;
 use crate::device::speaker::SPEAKER;
 use crate::device::terminal::terminal;
+use crate::device::pit;
 use crate::thread::scheduler::scheduler;
 use crate::thread::thread::Thread;
 
@@ -35,10 +36,11 @@ pub fn thread_demo() {
 
 /// Increment and display a counter until it reaches the limit.
 fn thread_entry() {
-    const COUNTER_LIMIT: usize = 100;
+    const COUNTER_LIMIT: usize = 1000;
     const YIELD_INTERVAL: usize = 10;
 
     let id = scheduler().get_active_tid();
+    let start_time = pit::system_time();
     let mut counter = 0usize;
 
     loop {
@@ -49,7 +51,19 @@ fn thread_entry() {
         }
 
         if counter == COUNTER_LIMIT {
-            info!("Thread {} reached {} and exits", id, counter);
+            let elapsed = pit::system_time().wrapping_sub(start_time);
+            {
+                let mut terminal = terminal().lock();
+                terminal.set_pos(0, id + 7);
+                print_terminal!(
+                    &mut *terminal,
+                    "Thread [{}]: {:>12} ({:>6} ms)",
+                    id,
+                    counter,
+                    elapsed,
+                );
+            }
+            info!("Thread {} reached {} after {} ms and exits", id, counter, elapsed);
             return;
         }
 
