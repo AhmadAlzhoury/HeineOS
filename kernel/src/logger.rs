@@ -9,6 +9,7 @@
 use core::fmt::Write;
 use core::sync::atomic::{AtomicBool, Ordering};
 use log::{Metadata, Record};
+use crate::device::pit;
 use crate::device::{serial, terminal};
 
 /// A simple logger implementing the `log::Log` trait, writing to the serial port (COM1).
@@ -41,11 +42,16 @@ impl log::Log for Logger {
     fn log(&self, record: &Record) {
         let file = record.file().unwrap_or("unknown");
         let line = record.line().unwrap_or(0);
+        let milliseconds = pit::system_time();
+        let seconds = milliseconds / 1000;
+        let milliseconds = milliseconds % 1000;
         let mut com1 = serial::COM1.lock();
 
         let _ = writeln!(
             &mut *com1,
-            "[0.000] [{}] [{}@{}] : {}",
+            "[{}.{:03}] [{}] [{}@{}] : {}",
+            seconds,
+            milliseconds,
             level_abbreviation(record.level()),
             file,
             line,
@@ -56,7 +62,9 @@ impl log::Log for Logger {
             if let Some(mut terminal) = terminal::terminal().try_lock() {
                 let _ = writeln!(
                     &mut *terminal,
-                    "[0.000] [{}] [{}@{}] : {}",
+                    "[{}.{:03}] [{}] [{}@{}] : {}",
+                    seconds,
+                    milliseconds,
                     level_abbreviation(record.level()),
                     file,
                     line,

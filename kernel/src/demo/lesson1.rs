@@ -7,11 +7,12 @@
  */
 
 use crate::device::keyboard::keyboard_buffer;
+use crate::device::key::Scancode;
 use crate::device::terminal::terminal;
 
 /// A simple text demo, displaying formatted numbers.
 pub fn text_demo() {
-    terminal().lock();
+    terminal().lock().clear();
 
     println!("");
     println!("Text Demo:");
@@ -32,7 +33,7 @@ pub fn text_demo() {
 
 /// A simple keyboard demo, displaying the events of key presses and releases.
 pub fn keyboard_demo() {
-    terminal().lock();
+    terminal().lock().clear();
 
     println!("");
     println!("Keyboard Demo:");
@@ -42,6 +43,8 @@ pub fn keyboard_demo() {
     loop {
         let key = keyboard_buffer().poll_key_event();
         println!("{:?}", key);
+        if key.pressed() && key.scancode() == Some(Scancode::Escape) {
+            break;
+        }
     }
-    println!("");
 }

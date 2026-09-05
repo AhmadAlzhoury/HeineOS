@@ -10,6 +10,7 @@
  */
 
 use crate::device::cpu::IoPort;
+use core::sync::atomic::{AtomicBool, Ordering};
 use crate::device::pit;
 use crate::library::spinlock::Spinlock;
 
@@ -74,6 +75,11 @@ enum SpeakerRegister {
 
 /// Base frequency of the PIT (Programmable Interval Timer) in Hz.
 const PIT_FREQUENCY: usize = 1193180;
+static CANCELLED: AtomicBool = AtomicBool::new(false);
+
+pub fn set_cancelled(cancelled: bool) {
+    CANCELLED.store(cancelled, Ordering::Release);
+}
 
 impl Speaker {
     /// Create a new Speaker instance.
@@ -89,7 +95,7 @@ impl Speaker {
     pub fn play(&mut self, frequency: usize, duration: usize) {
         if frequency == 0 {
             self.off();
-            pit::wait(duration);
+            wait_cancellable(duration);
             return;
         }
 
@@ -102,7 +108,7 @@ impl Speaker {
         }
 
         self.on();
-        pit::wait(duration);
+        wait_cancellable(duration);
         self.off();
     }
 
@@ -121,6 +127,13 @@ impl Speaker {
             let status = self.ppi_port.inb();
             self.ppi_port.outb(status & !0x03);
         }
+    }
+}
+
+fn wait_cancellable(duration: usize) {
+    let start = pit::system_time();
+    while pit::system_time().wrapping_sub(start) < duration && !CANCELLED.load(Ordering::Acquire) {
+        crate::thread::scheduler::yield_cpu_if_initialized();
     }
 }
 
@@ -151,7 +164,7 @@ pub fn tetris() {
     speaker.play(1056, 500);
     speaker.play(880, 500);
     speaker.play(880, 500);
-    pit::wait(250);
+    wait_cancellable(250);
     speaker.play(1188, 500);
     speaker.play(1408, 250);
     speaker.play(1760, 500);
@@ -170,7 +183,7 @@ pub fn tetris() {
     speaker.play(1056, 500);
     speaker.play(880, 500);
     speaker.play(880, 500);
-    pit::wait(500);
+    wait_cancellable(500);
     speaker.play(1320, 500);
     speaker.play(990, 250);
     speaker.play(1056, 250);
@@ -192,7 +205,7 @@ pub fn tetris() {
     speaker.play(1056, 500);
     speaker.play(880, 500);
     speaker.play(880, 500);
-    pit::wait(250);
+    wait_cancellable(250);
     speaker.play(1188, 500);
     speaker.play(1408, 250);
     speaker.play(1760, 500);
@@ -211,7 +224,7 @@ pub fn tetris() {
     speaker.play(1056, 500);
     speaker.play(880, 500);
     speaker.play(880, 500);
-    pit::wait(500);
+    wait_cancellable(500);
     speaker.play(660, 1000);
     speaker.play(528, 1000);
     speaker.play(594, 1000);
@@ -228,6 +241,10 @@ pub fn tetris() {
     speaker.play(660, 500);
     speaker.play(880, 1000);
     speaker.play(838, 2000);
+
+    if CANCELLED.load(Ordering::Acquire) {
+        return;
+    }
     speaker.play(660, 1000);
     speaker.play(528, 1000);
     speaker.play(594, 1000);

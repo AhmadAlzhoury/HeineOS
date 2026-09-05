@@ -27,6 +27,8 @@ use crate::device::serial::COM1;
 use crate::device::terminal;
 use crate::filesystem::tarfs;
 use crate::logger::Logger;
+use crate::thread::scheduler::scheduler;
+use crate::thread::thread::Thread;
 
 #[macro_use]
 mod device;
@@ -104,8 +106,8 @@ pub extern "C" fn main(multiboot_magic: u32, multiboot: &multiboot::BootInfo) ->
 
     init_interrupts();
 
-    demo::lesson7::print_pci_devices();
-    demo::lesson7::rtl8139_demo();
+    scheduler().ready(Thread::new(demo::menu::run));
+    scheduler().schedule();
 
     // Endless loop, as we cannot return from main().
     loop {}

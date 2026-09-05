@@ -7,7 +7,7 @@
 use crate::device::cpu::IoPort;
 use crate::device::pci::{pci_bus, Command};
 use crate::device::terminal::terminal;
-use crate::library::input;
+use crate::demo::menu::wait_for_escape;
 
 pub fn print_pci_devices() {
     terminal().lock().clear();
@@ -17,8 +17,8 @@ pub fn print_pci_devices() {
         println!("Found PCI device {:04x}:{:04x}", device.read_vendor_id(), device.read_device_id());
     }
 
-    println!("\nPress 'Enter' to exit...");
-    input::wait_for_return();
+    println!("\nPress 'Esc' to exit...");
+    wait_for_escape();
 }
 
 pub fn rtl8139_demo() {
@@ -48,14 +48,16 @@ pub fn rtl8139_demo() {
             // Read mac address from the RTL8139 registers -> Always at offset 0x00-0x05
             // MMIO access is done via volatile reads to ensure the compiler does not optimize them away
             let mac_address_ptr = (mmio_base) as *const u8;
-            let mac_address = unsafe {[
-                mac_address_ptr.add(0).read_volatile(),
-                mac_address_ptr.add(1).read_volatile(),
-                mac_address_ptr.add(2).read_volatile(),
-                mac_address_ptr.add(3).read_volatile(),
-                mac_address_ptr.add(4).read_volatile(),
-                mac_address_ptr.add(5).read_volatile()
-            ]};
+            let mac_address = unsafe {
+                [
+                    mac_address_ptr.add(0).read_volatile(),
+                    mac_address_ptr.add(1).read_volatile(),
+                    mac_address_ptr.add(2).read_volatile(),
+                    mac_address_ptr.add(3).read_volatile(),
+                    mac_address_ptr.add(4).read_volatile(),
+                    mac_address_ptr.add(5).read_volatile()
+                ]
+            };
             println!("MAC address: {:x?}", mac_address);
         } else {
             // The address in BAR0 is a 16-bit I/O port address
@@ -66,20 +68,22 @@ pub fn rtl8139_demo() {
             rtl8139.write_command(rtl8139.read_command() | Command::IoEnable as u16);
 
             // Read mac address from the RTL8139 registers -> Always at offset 0x00-0x05
-            let mac_address = unsafe {[
-                IoPort::new(io_base + 0).inb(),
-                IoPort::new(io_base + 1).inb(),
-                IoPort::new(io_base + 2).inb(),
-                IoPort::new(io_base + 3).inb(),
-                IoPort::new(io_base + 4).inb(),
-                IoPort::new(io_base + 5).inb()
-            ]};
+            let mac_address = unsafe {
+                [
+                    IoPort::new(io_base + 0).inb(),
+                    IoPort::new(io_base + 1).inb(),
+                    IoPort::new(io_base + 2).inb(),
+                    IoPort::new(io_base + 3).inb(),
+                    IoPort::new(io_base + 4).inb(),
+                    IoPort::new(io_base + 5).inb()
+                ]
+            };
             println!("MAC address: {:x?}", mac_address);
         }
     } else {
         println!("No RTL8139 device found!");
     }
 
-    println!("\nPress 'Enter' to exit...");
-    input::wait_for_return();
+    println!("\nPress 'Esc' to exit...");
+    wait_for_escape();
 }

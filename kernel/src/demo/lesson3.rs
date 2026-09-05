@@ -12,7 +12,7 @@ use crate::device::terminal::terminal;
 /// Display key events produced by the interrupt-driven keyboard driver.
 /// The demo returns when the Escape key is pressed.
 pub fn keyboard_interrupt_demo() {
-    terminal().lock();
+    terminal().lock().clear();
 
     println!("");
     println!("");

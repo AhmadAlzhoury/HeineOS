@@ -10,12 +10,13 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::ffi::{c_char, c_int, c_size_t, c_void};
 use core::ptr;
+use core::sync::atomic::{AtomicBool, Ordering};
 use log::{info, warn};
 use crate::device::key::Scancode;
 use crate::device::keyboard::keyboard_buffer;
 use crate::device::serial::COM3;
 use crate::device::{pit, terminal};
-use crate::filesystem::tarfs::{filesystem, FsError};
+use crate::filesystem::tarfs::{filesystem, FsError, SeekMode};
 use crate::library::once::Once;
 use crate::library::spinlock::Spinlock;
 
@@ -154,6 +155,7 @@ static ROM: Once<Vec<u8>> = Once::new();
 
 /// Cartridge RAM, sized according to the loaded ROM's header.
 static CART_RAM: Spinlock<Vec<u8>> = Spinlock::new(Vec::new());
+static CART_RAM_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 /// Save data imported from the initrd and exported through COM3.
 const SAVE_PATH: &str = "/roms/gameboy.sav";
@@ -318,8 +320,15 @@ pub fn play(rom_path: &str) {
 fn initialize_cart_ram(save_size: usize) {
     let filesystem = filesystem();
     let mut cart_ram = CART_RAM.lock();
+
+    if CART_RAM_INITIALIZED.load(Ordering::Acquire) && cart_ram.len() == save_size {
+        info!("Reusing {} bytes of cartridge RAM from the current session", save_size);
+        return;
+    }
+
     cart_ram.clear();
     cart_ram.resize(save_size, 0);
+    CART_RAM_INITIALIZED.store(true, Ordering::Release);
 
     if save_size == 0 {
         info!("The loaded ROM does not use cartridge RAM");
@@ -336,18 +345,28 @@ fn initialize_cart_ram(save_size: usize) {
     };
 
     let file_size = filesystem.size(file).expect("Failed to get save file size");
-    if file_size != save_size {
+    if file_size == 0 || file_size % save_size != 0 {
         filesystem.close(file).expect("Failed to close invalid save file");
         warn!(
-            "Ignoring save file with invalid size: expected {}, got {}",
+            "Ignoring save file with invalid size: expected a nonzero multiple of {}, got {}",
             save_size, file_size
         );
         return;
     }
+
+    let snapshot_offset = file_size - save_size;
+    filesystem
+        .seek(file, snapshot_offset as isize, SeekMode::Start)
+        .expect("Failed to seek to latest save snapshot");
     let bytes_read = filesystem.read(file, &mut cart_ram).expect("Failed to read save file");
     filesystem.close(file).expect("Failed to close save file");
     assert_eq!(bytes_read, save_size, "Failed to read complete save file");
-    info!("Loaded {} bytes of cartridge RAM from '{}'", save_size, SAVE_PATH);
+    info!(
+        "Loaded latest {}-byte cartridge RAM snapshot from '{}' ({} snapshot(s))",
+        save_size,
+        SAVE_PATH,
+        file_size / save_size
+    );
 }
 
 /// Export cartridge RAM as raw bytes through the third serial port.

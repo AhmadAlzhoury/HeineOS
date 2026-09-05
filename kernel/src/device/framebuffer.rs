@@ -52,6 +52,7 @@ pub const BLUE: u32 = color(0, 0, 170);
 pub const MAGENTA: u32 = color(170, 0, 170);
 pub const CYAN: u32 = color(0, 170, 170);
 pub const WHITE: u32 = color(170, 170, 170);
+pub const GRAY: u32 = color(85, 85, 85);
 
 impl Framebuffer {
     /// Create a new Framebuffer instance.

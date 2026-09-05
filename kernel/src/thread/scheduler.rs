@@ -10,6 +10,7 @@
 use alloc::boxed::Box;
 use core::fmt::Display;
 use core::{fmt, ptr};
+use core::sync::atomic::{AtomicBool, Ordering};
 use crate::allocator;
 use crate::device::cpu;
 use crate::library::once::Once;
@@ -20,6 +21,7 @@ use crate::thread::thread::Thread;
 
 /// Global scheduler instance
 static SCHEDULER: Once<Scheduler> = Once::new();
+static SCHEDULING_SUSPENDED: AtomicBool = AtomicBool::new(false);
 
 /// Global access to the scheduler.
 pub fn scheduler() -> &'static Scheduler {
@@ -36,6 +38,16 @@ pub fn yield_cpu_if_initialized() {
     if let Some(scheduler) = SCHEDULER.get() {
         scheduler.yield_cpu();
     }
+}
+
+/// Temporarily prevent thread context switches while preserving hardware interrupts.
+pub fn suspend_scheduling() {
+    SCHEDULING_SUSPENDED.store(true, Ordering::Release);
+}
+
+/// Re-enable thread context switches after `suspend_scheduling()`.
+pub fn resume_scheduling() {
+    SCHEDULING_SUSPENDED.store(false, Ordering::Release);
 }
 
 /// Unlock the scheduler state.
@@ -121,7 +133,6 @@ impl Scheduler {
         // free its resources after switching to a different stack.
         state.terminated_threads.enqueue(current);
         state.active_thread = Some(next);
-
         unsafe {
             // Switch to the next thread.
             // `terminated_threads` contains the old thread we want to exit,
@@ -152,6 +163,10 @@ impl Scheduler {
 
     /// Yield the CPU and switch to the next thread in the ready queue.
     pub fn yield_cpu(&self) {
+        if SCHEDULING_SUSPENDED.load(Ordering::Acquire) {
+            return;
+        }
+
         if allocator::global::is_allocator_locked() {
             return;
         }
@@ -173,7 +188,6 @@ impl Scheduler {
 
         state.ready_queue.enqueue(current);
         state.active_thread = Some(next);
-
         unsafe {
             Thread::switch(current_ptr, state.active_thread.as_mut().unwrap().as_mut());
         }

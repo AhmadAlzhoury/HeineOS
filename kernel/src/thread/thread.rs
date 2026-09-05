@@ -27,9 +27,10 @@ pub fn next_id() -> usize {
 unsafe extern "C" fn thread_start(stack_ptr: usize) {
     naked_asm!(
         "mov rsp, rdi",
-        "sub rsp, 8",
+        "mov r12, rsp",
+        "and rsp, -16",
         "call unlock_scheduler",
-        "add rsp, 8",
+        "mov rsp, r12",
         "popfq",
         "pop rbp",
         "pop rdi",
@@ -74,9 +75,10 @@ unsafe extern "C" fn thread_switch(current_stack_ptr: *mut usize, next_stack: us
         "pushfq",
         "mov [rdi], rsp",
         "mov rsp, rsi",
-        "sub rsp, 8",
+        "mov r12, rsp",
+        "and rsp, -16",
         "call unlock_scheduler",
-        "add rsp, 8",
+        "mov rsp, r12",
         "popfq",
         "pop rbp",
         "pop rdi",
@@ -157,29 +159,31 @@ impl Thread {
     /// The prepared stack is used in 'thread_start' to start the first thread.
     /// Other threads are started by 'thread_switch' with the prepared stack.
     fn prepare_stack(&mut self) {
-        let kickoff = (Thread::kickoff as *const()) as u64;
+        let kickoff = (Thread::kickoff as *const ()) as u64;
         let thread = ptr::from_mut(self) as u64;
         let length = self.stack.len();
 
-        self.stack[length - 1] = kickoff; // Address of 'kickoff'
-        self.stack[length - 2] = 0; // r8
-        self.stack[length - 3] = 0; // r9
-        self.stack[length - 4] = 0; // r10
-        self.stack[length - 5] = 0; // r11
-        self.stack[length - 6] = 0; // r12
-        self.stack[length - 7] = 0; // r13
-        self.stack[length - 8] = 0; // r14
-        self.stack[length - 9] = 0; // r15
-        self.stack[length - 10] = 0; // rax
-        self.stack[length - 11] = 0; // rbx
-        self.stack[length - 12] = 0; // rcx
-        self.stack[length - 13] = 0; // rdx
-        self.stack[length - 14] = 0; // rsi
-        self.stack[length - 15] = thread; // rdi -> First parameter for 'kickoff'
-        self.stack[length - 16] = 0; // rbp
-        self.stack[length - 17] = 0x2; // rflags (IE = 0); interrupts disabled
+        // Keep the last word unused so the stack is aligned as required by the
+        // x86-64 System V ABI when `ret` enters `kickoff`.
+        self.stack[length - 2] = kickoff; // Address of 'kickoff'
+        self.stack[length - 3] = 0; // r8
+        self.stack[length - 4] = 0; // r9
+        self.stack[length - 5] = 0; // r10
+        self.stack[length - 6] = 0; // r11
+        self.stack[length - 7] = 0; // r12
+        self.stack[length - 8] = 0; // r13
+        self.stack[length - 9] = 0; // r14
+        self.stack[length - 10] = 0; // r15
+        self.stack[length - 11] = 0; // rax
+        self.stack[length - 12] = 0; // rbx
+        self.stack[length - 13] = 0; // rcx
+        self.stack[length - 14] = 0; // rdx
+        self.stack[length - 15] = 0; // rsi
+        self.stack[length - 16] = thread; // rdi -> First parameter for 'kickoff'
+        self.stack[length - 17] = 0; // rbp
+        self.stack[length - 18] = 0x2; // rflags (IE = 0); interrupts disabled
 
-        self.stack_ptr = self.stack_ptr - (size_of::<u64>() * 16);
+        self.stack_ptr -= size_of::<u64>() * 17;
     }
 
     /// Called indirectly by using the prepared stack in 'thread_start' and 'thread_switch'.

@@ -7,12 +7,19 @@
  */
 
 use log::info;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use crate::device::key::Scancode;
+use crate::device::keyboard::keyboard_buffer;
 use crate::device::speaker;
 use crate::device::speaker::SPEAKER;
 use crate::device::terminal::terminal;
 use crate::device::pit;
 use crate::thread::scheduler::scheduler;
 use crate::thread::thread::Thread;
+
+static THREAD_DEMO_RUNNING: AtomicBool = AtomicBool::new(false);
+static THREAD_DEMO_WORKERS: AtomicUsize = AtomicUsize::new(0);
+static THREAD_DEMO_NEXT_ROW: AtomicUsize = AtomicUsize::new(0);
 
 /// Showcase preemptive multithreading with three counters and a PC speaker melody.
 /// The PIT preempts the threads at a fixed interval, while occasional voluntary yields
@@ -22,16 +29,34 @@ pub fn thread_demo() {
     println!("Preemptive Thread Demo:");
     println!("");
     println!("Three counters and a PC speaker melody run concurrently.");
+    println!("Press 'Esc' to return to the demo menu.");
 
     let scheduler = scheduler();
 
-    // The scheduler creates idle thread T0. The counters are T1-T3 and
-    // the PC speaker melody runs in T4.
+    THREAD_DEMO_RUNNING.store(true, Ordering::Release);
+    THREAD_DEMO_WORKERS.store(4, Ordering::Release);
+    THREAD_DEMO_NEXT_ROW.store(0, Ordering::Release);
+    speaker::set_cancelled(false);
     scheduler.ready(Thread::new(thread_entry));
     scheduler.ready(Thread::new(thread_entry));
     scheduler.ready(Thread::new(thread_entry));
     scheduler.ready(Thread::new(melody_entry));
-    scheduler.schedule();
+
+    while THREAD_DEMO_RUNNING.load(Ordering::Acquire) {
+        if let Some(event) = keyboard_buffer().pop_key_event() {
+            if event.pressed() && event.scancode() == Some(Scancode::Escape) {
+                THREAD_DEMO_RUNNING.store(false, Ordering::Release);
+                speaker::set_cancelled(true);
+            }
+        }
+        scheduler.yield_cpu();
+    }
+
+    while THREAD_DEMO_WORKERS.load(Ordering::Acquire) != 0 {
+        scheduler.yield_cpu();
+    }
+    scheduler.cleanup_terminated_threads();
+    speaker::set_cancelled(false);
 }
 
 /// Increment and display a counter until it reaches the limit.
@@ -40,13 +65,19 @@ fn thread_entry() {
     const YIELD_INTERVAL: usize = 10;
 
     let id = scheduler().get_active_tid();
+    let row = THREAD_DEMO_NEXT_ROW.fetch_add(1, Ordering::AcqRel) + 7;
     let start_time = pit::system_time();
     let mut counter = 0usize;
 
     loop {
+        if !THREAD_DEMO_RUNNING.load(Ordering::Acquire) {
+            THREAD_DEMO_WORKERS.fetch_sub(1, Ordering::AcqRel);
+            return;
+        }
+
         {
             let mut terminal = terminal().lock();
-            terminal.set_pos(0, id + 7);
+            terminal.set_pos(0, row);
             print_terminal!(&mut *terminal, "Thread [{}]: {:>12}", id, counter);
         }
 
@@ -54,7 +85,7 @@ fn thread_entry() {
             let elapsed = pit::system_time().wrapping_sub(start_time);
             {
                 let mut terminal = terminal().lock();
-                terminal.set_pos(0, id + 7);
+                terminal.set_pos(0, row);
                 print_terminal!(
                     &mut *terminal,
                     "Thread [{}]: {:>12} ({:>6} ms)",
@@ -64,6 +95,7 @@ fn thread_entry() {
                 );
             }
             info!("Thread {} reached {} after {} ms and exits", id, counter, elapsed);
+            THREAD_DEMO_WORKERS.fetch_sub(1, Ordering::AcqRel);
             return;
         }
 
@@ -96,6 +128,8 @@ fn melody_entry() {
         speaker.play(frequency, 250);
     }
     drop(speaker);
+
+    THREAD_DEMO_WORKERS.fetch_sub(1, Ordering::AcqRel);
 
     {
         let mut terminal = terminal().lock();
