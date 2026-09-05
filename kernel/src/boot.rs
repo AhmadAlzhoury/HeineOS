@@ -8,7 +8,7 @@
 #![no_std]
 #![feature(abi_x86_interrupt)]
 #![feature(unsafe_cell_access)]
-
+#![feature(c_size_t)]
 // Silence compiler warnings.
 // This is done to avoid overwhelming compiler output when building the OS at the beginning.
 // As you move on with the course, the warnings for unused functions or parameters will become less relevant,
@@ -25,6 +25,7 @@ use uefi::mem::memory_map::MemoryMapOwned;
 use crate::device::framebuffer::Framebuffer;
 use crate::device::serial::COM1;
 use crate::device::terminal;
+use crate::filesystem::tarfs;
 use crate::logger::Logger;
 
 #[macro_use]
@@ -94,9 +95,16 @@ pub extern "C" fn main(multiboot_magic: u32, multiboot: &multiboot::BootInfo) ->
 
     allocator::global::init_allocator(consts::heap_start(), consts::HEAP_SIZE);
 
+    let initrd = multiboot
+        .find_tag::<multiboot::ModuleTag>(multiboot::TagType::Module)
+        .expect("Missing initial ramdisk module");
+    let archive = tar_no_std::TarArchiveRef::new(initrd.as_slice())
+        .expect("Initial ramdisk is not a valid TAR archive");
+    tarfs::init_filesystem(archive);
+
     init_interrupts();
 
-    demo::lesson5::thread_demo();
+    demo::lesson6::peanut_gb::play("/roms/2048.gb");
 
     // Endless loop, as we cannot return from main().
     loop {}

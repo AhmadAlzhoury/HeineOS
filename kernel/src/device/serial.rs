@@ -13,6 +13,9 @@ use crate::device::cpu::IoPort;
 /// Standard COM port for kernel output via the logger
 pub static COM1: Spinlock<ComPort> = Spinlock::new(ComPort::new(ComBaseAddress::Com1));
 
+/// Third COM port, used by the Game Boy emulator to export save data.
+pub static COM3: Spinlock<ComPort> = Spinlock::new(ComPort::new(ComBaseAddress::Com3));
+
 #[allow(dead_code)]
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(u16)]
@@ -86,7 +89,15 @@ impl ComPort {
 
     /// Write a single byte to the COM port.
     pub fn write_byte(&mut self, byte: u8) {
+        self.write_raw_byte(byte);
 
+        if byte == b'\n' {
+            self.write_raw_byte(b'\r');
+        }
+    }
+
+    /// Write a single byte without performing text newline conversion.
+    pub fn write_raw_byte(&mut self, byte: u8) {
         while !LineStatus::from_bits_retain(unsafe { self.line_status_port.inb() })
             .contains(LineStatus::READY_TO_WRITE)
         {
@@ -94,10 +105,6 @@ impl ComPort {
         }
 
         unsafe { self.data_port.outb(byte); }
-
-        if byte == b'\n' {
-            self.write_byte(b'\r');
-        }
     }
 }
 

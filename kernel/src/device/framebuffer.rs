@@ -5,7 +5,6 @@
  *         Fabian Ruhland, Heinrich Heine University Duesseldorf, 2026-01-07
  * License: GPLv3
  */
-use core::cmp::max;
 use crate::library::bitmap::Bitmap;
 
 #[cfg(not(feature = "unifont"))]
@@ -233,20 +232,26 @@ impl Framebuffer {
         // Original bitmap dimensions
         let bmp_width = bitmap.width() as usize;
         let bmp_height = bitmap.height() as usize;
+        if x >= self.width || y >= self.height || bmp_width == 0 || bmp_height == 0 {
+            return;
+        }
 
-        // Clip the bitmap to the framebuffer dimensions
-        let target_width = if x + bmp_width > self.width {
-            max(self.width - x, 0)
-        } else {
-            bmp_width
-        };
+        let target_width = bmp_width.min(self.width - x);
+        let target_height = bmp_height.min(self.height - y);
+        let source = bitmap.pixel_data();
+        let framebuffer = self.address as *mut u8;
 
-        let target_height = if y + bmp_height > self.height {
-            max(self.height - y, 0)
-        } else {
-            bmp_height
-        };
+        for row in 0..target_height {
+            let source_offset = row * bmp_width;
+            let target_offset = (y + row) * self.pitch + x * size_of::<u32>();
 
-        todo!("framebuffer::draw_bitmap() is not yet implemented");
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    source.as_ptr().add(source_offset),
+                    framebuffer.add(target_offset).cast::<u32>(),
+                    target_width,
+                );
+            }
+        }
     }
 }

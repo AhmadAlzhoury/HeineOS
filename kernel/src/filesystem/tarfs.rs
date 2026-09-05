@@ -44,7 +44,7 @@ pub struct TarFs {
 /// This works similarly to file descriptors in Unix-like operating systems.
 pub struct FileHandle(usize);
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 /// Possible errors that can occur when interacting with the TarFs filesystem.
 pub enum FsError {
     /// The specified file was not found in the archive.
@@ -96,12 +96,25 @@ impl TarFs {
     /// If the file is not found, an `FsError::FileNotFound` error is returned.
     pub fn open(&self, mut path: &str) -> Result<FileHandle, FsError> {
         // Paths in tar archives do not start with a leading slash, so we remove it if present.
-        if path.starts_with('/') {
-            path = &path[1..];
-        }
+        path = path.trim_start_matches('/');
 
         // Find the entry in the archive matching the given path.
-        todo!("tarfs::open() is not yet implemented");
+        let entry = self
+            .archive
+            .entries()
+            .find(|entry| entry.filename().as_str().is_ok_and(|filename| filename == path))
+            .ok_or(FsError::FileNotFound)?;
+
+        let mut open_handles = self.open_handles.lock();
+        let handle = loop {
+            let handle = FileHandle(self.next_handle_id());
+            if !open_handles.contains_key(&handle) {
+                break handle;
+            }
+        };
+
+        open_handles.insert(handle, OpenFile { data: entry, position: 0 });
+        Ok(handle)
     }
 
     /// Read data from an opened file into the provided buffer.
@@ -111,7 +124,20 @@ impl TarFs {
     /// If the file is already at the end at the start of the read operation, an `FsError::EndOfFile` error is returned.
     /// If the provided file handle is invalid, an `FsError::InvalidHandle` error is returned.
     pub fn read(&self, handle: FileHandle, buffer: &mut [u8]) -> Result<usize, FsError> {
-        todo!("tarfs::read() is not yet implemented");
+        let mut open_handles = self.open_handles.lock();
+        let open_file = open_handles.get_mut(&handle).ok_or(FsError::InvalidHandle)?;
+        let data = open_file.data.data();
+
+        if open_file.position >= data.len() {
+            return Err(FsError::EndOfFile);
+        }
+
+        let read_size = min(buffer.len(), data.len() - open_file.position);
+        let end = open_file.position + read_size;
+        buffer[..read_size].copy_from_slice(&data[open_file.position..end]);
+        open_file.position = end;
+
+        Ok(read_size)
     }
 
     /// Seek to a new position within an opened file.
@@ -120,12 +146,34 @@ impl TarFs {
     /// The function returns the new position within the file after seeking.
     /// If the provided file handle is invalid, an `FsError::InvalidHandle` error is returned.
     pub fn seek(&self, handle: FileHandle, offset: isize, mode: SeekMode) -> Result<usize, FsError> {
-        todo!("tarfs::seek() is not yet implemented");
+        let mut open_handles = self.open_handles.lock();
+        let open_file = open_handles.get_mut(&handle).ok_or(FsError::InvalidHandle)?;
+        let size = open_file.data.size();
+        let base = match mode {
+            SeekMode::Start => 0,
+            SeekMode::Current => open_file.position,
+            SeekMode::End => size,
+        };
+
+        open_file.position = base.saturating_add_signed(offset).min(size);
+        Ok(open_file.position)
     }
-    
+
     /// Get the size of an opened file in bytes.
     /// If the provided file handle is invalid, an `FsError::InvalidHandle` error is returned.
     pub fn size(&self, handle: FileHandle) -> Result<usize, FsError> {
-        todo!("tarfs::size() is not yet implemented");
+        let open_handles = self.open_handles.lock();
+        let open_file = open_handles.get(&handle).ok_or(FsError::InvalidHandle)?;
+        Ok(open_file.data.size())
+    }
+
+    /// Close an open file and invalidate its handle.
+    /// If the provided file handle is invalid, an `FsError::InvalidHandle` error is returned.
+    pub fn close(&self, handle: FileHandle) -> Result<(), FsError> {
+        let mut open_handles = self.open_handles.lock();
+        open_handles
+            .remove(&handle)
+            .map(|_| ())
+            .ok_or(FsError::InvalidHandle)
     }
 }

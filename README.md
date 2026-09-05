@@ -6,7 +6,7 @@
 3. Port a Game Boy emulator (Peanut-GB) to HeineOS that can load a ROM image from the filesystem
 
 ## Slides for this assignment
-- Lecture 7: [Filesystem](https://github.com/hhu-bsinfo/HeineOS/blob/main/slides/lecture7_filesystem.pdf)
+- Lecture 7: [Filesystem](slides/lecture7_filesystem.pdf)
 
 ## Assignment 6.1: Filesystem
 In this assignment, you will implement a basic read-only filesystem.
@@ -21,7 +21,7 @@ Our initrd is built automatically during the build process from the contents of 
 The final TAR archive is stored in the `loader` directory as `initrd.tar` and included in the OS image `HeineOS.img` together with the kernel.
 
 We use the crate [tar-no-std](https://lib.rs/crates/tar-no-std) to parse the TAR archive and access the files it contains.
-The filesystem code is located in the [filesystem/tarfs.rs](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-6/kernel/src/filesystem/tarfs.rs).
+The filesystem code is located in the [filesystem/tarfs.rs](kernel/src/filesystem/tarfs.rs).
 
 As a first step, you should find the initial ramdisk in memory and initialize the filesystem with it.
 Start by searching for the initrd in `boot.rs` using `multiboot.find_tag::<multiboot::ModuleTag>(multiboot::TagType::Module)`.
@@ -49,7 +49,7 @@ Now that we have a working filesystem, we have a way to get useful files into th
 In this assignment, you will implement a basic bitmap image loader, which enables you to display a bitmap image on the screen.
 This is, for example, useful for game development, as bitmap images are often used to represent sprites.
 
-The given code in [library/bitmap.rs](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-6/kernel/src/filesystem/tarfs.rs) already contains all necessary structs.
+The given code in [library/bitmap.rs](kernel/src/filesystem/tarfs.rs) already contains all necessary structs.
 You only need to implement the function `Bitmap::from_bytes()` to parse a bitmap file from a slice of bytes.
 A detailed description of the BMP file format can be found on [Wikipedia](https://en.wikipedia.org/wiki/BMP_file_format).
 It is enough to support simple Windows BMP files with 24-bit color depth and no compression.
@@ -59,7 +59,7 @@ Be aware that each row of pixel data is padded to a 4-byte boundary.
 To be able to display the bitmap image, implement the function `Framebuffer::draw_bitmap()`.
 As the color data is already in the correct format, you can copy the pixel data to the framebuffer, row by row.
 
-The initrd already contains a bitmap image file called [heine.bmp](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-6/initrd/heine.bmp), that you can use to test your implementation.
+The initrd already contains a bitmap image file called [heine.bmp](initrd/heine.bmp), that you can use to test your implementation.
 
 ![HeineOS showing a bitmap image](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-6/bitmap.png)
 
@@ -73,7 +73,7 @@ This is an open source reimplementation of the popular game 2048. The source is 
 We will not provide any proprietary ROM files, as they are copyrighted by their creators.
 However, the emulator is able to play any ROM file that is compatible with the original Game Boy.
 
-Start by looking at the code in [demo/lesson6/peanut-gb.rs](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-6/kernel/src/demo/lesson6/peanut_gb.rs).
+Start by looking at the code in [demo/lesson6/peanut-gb.rs](kernel/src/demo/lesson6/peanut_gb.rs).
 It begins with declarations for functions that are implemented in the C code. By declaring them as `extern "C"` here, we can call them from Rust.
 Notice how parameters and return values have special types, corresponding to the C types (e.g., `c_int`, `c_long`, `c_void`).
 
@@ -87,7 +87,7 @@ The provided code already defines the enums `GbError` and `GbInitError`, corresp
 However, the most important struct used by the C code is the `gb_s` struct, which contains the entire emulator state.
 Redeclaring it in Rust would be a lot of work. Fortunately, we can work around this, as the C functions only want a pointer to the struct as a parameter.
 We only need to allocate memory for it and pass a pointer to it to the C code. Notice, how the function declaratations in Rust use the `c_void` type for the struct pointer.
-The size of the struct is provided by the C function `gb_size()` in [demo/lesson6/peanut-gb.c](https://github.com/hhu-bsinfo/HeineOS/blob/lesson-6/kernel/src/demo/lesson6/peanut_gb.c).  
+The size of the struct is provided by the C function `gb_size()` in [demo/lesson6/peanut-gb.c](kernel/src/demo/lesson6/peanut_gb.c).
 The only time when we need to access a field of the struct is when passing joypad button states to the C code.
 For this purpose, the function `gb_get_joypad_ptr()` in `peanut_gb.c` returns a pointer to the joypad state field of the passed struct.
 This is an 8-bit wide field, where each bit corresponds to a button of the Game Boy's joypad.

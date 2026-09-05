@@ -33,6 +33,8 @@ args = [
     "-vga", "std",
     "-rtc", "base=localtime",
     "-serial", "stdio",
+    "-serial", "none",
+    "-serial", "file:${INITRD_DIRECTORY}/roms/gameboy.sav",
 
     # Hard disk drive configuration
     "-drive", "driver=raw,if=none,id=boot,file.filename=${IMAGE}",
@@ -60,6 +62,8 @@ args = [
     "-vga", "std",
     "-rtc", "base=localtime",
     "-serial", "stdio",
+    "-serial", "none",
+    "-serial", "file:${INITRD_DIRECTORY}/roms/gameboy.sav",
 
     # Hard disk drive configuration
     "-drive", "driver=raw,if=none,id=boot,file.filename=${IMAGE}",
@@ -98,6 +102,7 @@ args = [ "image", "--target", "${IMAGE}", "--", "-config", "towboot.toml"]
 dependencies = [ "link-members", "initrd", "towbootctl",  ]
 condition = { files_modified = { input = [
     "${BOOTLOADER_DIRECTORY}/kernel.elf",
+    "${BOOTLOADER_DIRECTORY}/initrd.tar",
     "${BOOTLOADER_DIRECTORY}/towboot.toml"
 ], output = [
     "${IMAGE}"
@@ -131,7 +136,7 @@ ${TAR} -cf "${BOOTLOADER_DIRECTORY}/initrd.tar" *
 '''
 dependencies = [ "link-members" ]
 condition = { files_modified = { input = [
-    "${INITRD_DIRECTORY}/*",
+    "${INITRD_DIRECTORY}/**/*",
 ], output = [
     "${BOOTLOADER_DIRECTORY}/initrd.tar"
 ] } }

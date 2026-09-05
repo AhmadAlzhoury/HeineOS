@@ -6,10 +6,18 @@
  * License: GPLv3
  */
 
+use alloc::vec;
 use alloc::vec::Vec;
-use core::ffi::{c_char, c_int, c_size_t, c_void, CStr};
-use log::error;
+use core::ffi::{c_char, c_int, c_size_t, c_void};
+use core::ptr;
+use log::{info, warn};
+use crate::device::key::Scancode;
+use crate::device::keyboard::keyboard_buffer;
+use crate::device::serial::COM3;
+use crate::device::{pit, terminal};
+use crate::filesystem::tarfs::{filesystem, FsError};
 use crate::library::once::Once;
+use crate::library::spinlock::Spinlock;
 
 unsafe extern "C" {
     /// Get the size of the `gb_s` structure (implemented in `peanut-gb.c`).
@@ -100,7 +108,7 @@ enum GbInitError {
     NoError = 0,
     CartridgeUnsupported,
     InvalidChecksum,
-    UnknownError = 0xff
+    UnknownError = 0xff,
 }
 
 impl TryFrom<c_int> for GbInitError {
@@ -129,6 +137,9 @@ const MS_PER_FRAME: usize = 1000 / TARGET_FRAME_RATE;
 /// The original Game Boy screen resolution (160x144 pixels).
 const GB_SCREEN_RES: (usize, usize) = (160, 144);
 
+/// Scale used to render the Game Boy screen.
+const SCREEN_SCALE: usize = 2;
+
 /// The color palette used for rendering.
 /// The Game Boy supports 4 shades of gray, represented as 32-bit ARGB colors in this array.
 static PALETTE: &[u32] = &[
@@ -141,11 +152,19 @@ static PALETTE: &[u32] = &[
 /// The ROM file to be played by the emulator.
 static ROM: Once<Vec<u8>> = Once::new();
 
+/// Cartridge RAM, sized according to the loaded ROM's header.
+static CART_RAM: Spinlock<Vec<u8>> = Spinlock::new(Vec::new());
+
+/// Save data imported from the initrd and exported through COM3.
+const SAVE_PATH: &str = "/roms/gameboy.sav";
+
 /// Read a byte from the ROM file at the offset specified by `addr`.
 /// This is a callback function for the PeanutGB emulator.
 unsafe extern "C" fn gb_rom_read(_gb: *mut c_void, addr: u32) -> u8 {
-    // TODO: Read a byte from the ROM file.
-    0
+    ROM.get()
+        .and_then(|rom| rom.get(addr as usize))
+        .copied()
+        .unwrap_or(0xff)
 }
 
 /// Read a byte from the save RAM at the offset specified by `addr`.
@@ -153,8 +172,7 @@ unsafe extern "C" fn gb_rom_read(_gb: *mut c_void, addr: u32) -> u8 {
 ///
 /// This is mostly needed for save game support and part of an optional assignment.
 unsafe extern "C" fn gb_cart_ram_read(_gb: *mut c_void, addr: u32) -> u8 {
-    // TODO: Read a byte from the save RAM (optional assignment)
-    0
+    CART_RAM.lock().get(addr as usize).copied().unwrap_or(0xff)
 }
 
 /// Write a byte to the save RAM at the offset specified by `addr`.
@@ -162,7 +180,9 @@ unsafe extern "C" fn gb_cart_ram_read(_gb: *mut c_void, addr: u32) -> u8 {
 ///
 /// This is mostly needed for save game support and part of an optional assignment.
 unsafe extern "C" fn gb_cart_ram_write(_gb: *mut c_void, addr: u32, val: u8) {
-    // TODO: Write a byte to the save RAM (optional assignment)
+    if let Some(byte) = CART_RAM.lock().get_mut(addr as usize) {
+        *byte = val;
+    }
 }
 
 /// Draw a line of pixels from the Game Boy screen to the framebuffer.
@@ -170,17 +190,188 @@ unsafe extern "C" fn gb_cart_ram_write(_gb: *mut c_void, addr: u32, val: u8) {
 /// Each pixel is represented by a single byte, whose first two bits represent the color index.
 /// The other bits are used for Game Boy Color emulation, but are ignored in this implementation.
 unsafe extern "C" fn lcd_draw_line(_gb: *mut c_void, pixels: *const u8, line: u8) {
-    // TODO: Render the line to the framebuffer
+    let line = line as usize;
+    if pixels.is_null() || line >= GB_SCREEN_RES.1 {
+        return;
+    }
+
+    let pixels = unsafe { core::slice::from_raw_parts(pixels, GB_SCREEN_RES.0) };
+    let mut framebuffer = terminal::framebuffer().lock();
+    let screen_width = GB_SCREEN_RES.0 * SCREEN_SCALE;
+    let screen_height = GB_SCREEN_RES.1 * SCREEN_SCALE;
+    if screen_width > framebuffer.width() || screen_height > framebuffer.height() {
+        return;
+    }
+
+    let start_x = (framebuffer.width() - screen_width) / 2;
+    let start_y = (framebuffer.height() - screen_height) / 2;
+
+    for (source_x, pixel) in pixels.iter().enumerate() {
+        let color = PALETTE[(pixel & 0x03) as usize];
+        let target_x = start_x + source_x * SCREEN_SCALE;
+        let target_y = start_y + line * SCREEN_SCALE;
+
+        for y_offset in 0..SCREEN_SCALE {
+            for x_offset in 0..SCREEN_SCALE {
+                unsafe {
+                    framebuffer.draw_pixel_unchecked(
+                        target_x + x_offset,
+                        target_y + y_offset,
+                        color,
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Handle emulation errors.
 /// This is a callback function for the PeanutGB emulator.
 unsafe extern "C" fn gb_error(_gb: *mut c_void, error: c_int, addr: u16) {
     let error = GbError::try_from(error).unwrap_or(GbError::UnknownError);
-    error!("PeanutGB error [{:?}] at address [0x{:0>4x}]!", error, addr);
+    panic!("PeanutGB error [{:?}] at address [0x{:0>4x}]!", error, addr);
 }
 
 /// Play the given ROM file using the Peanut-GB emulator.
 pub fn play(rom_path: &str) {
-    todo!("peanut-gb demo is not yet implemented");
+    let filesystem = filesystem();
+    let file = filesystem.open(rom_path).expect("Failed to open Game Boy ROM");
+    let rom_size = filesystem.size(file).expect("Failed to get Game Boy ROM size");
+    let mut rom = vec![0; rom_size];
+    filesystem.read(file, &mut rom).expect("Failed to read Game Boy ROM");
+    filesystem.close(file).expect("Failed to close Game Boy ROM");
+    ROM.init(|| rom);
+
+    let gb_size = usize::try_from(unsafe { gb_size() }).expect("Invalid Peanut-GB state size");
+    let mut gb = vec![0u8; gb_size];
+    let gb_ptr = gb.as_mut_ptr().cast::<c_void>();
+
+    let init_result = unsafe {
+        gb_init(
+            gb_ptr,
+            gb_rom_read,
+            gb_cart_ram_read,
+            gb_cart_ram_write,
+            gb_error,
+            ptr::null(),
+        )
+    };
+    let init_error = GbInitError::try_from(init_result).unwrap_or(GbInitError::UnknownError);
+    if init_error != GbInitError::NoError {
+        panic!("Failed to initialize Peanut-GB (Error: {:?})", init_error);
+    }
+
+    let mut save_size = 0usize;
+    let save_size_result = unsafe { gb_get_save_size_s(gb_ptr, &mut save_size) };
+    assert_eq!(save_size_result, 0, "Invalid cartridge RAM size");
+    initialize_cart_ram(save_size);
+
+    let mut title = [0 as c_char; 17];
+    unsafe {
+        gb_get_rom_name(gb_ptr, title.as_mut_ptr());
+        gb_init_lcd(gb_ptr, lcd_draw_line as *const c_void);
+    }
+    let title_len = title.iter().position(|&character| character == 0).unwrap_or(title.len());
+    let title_bytes = unsafe { core::slice::from_raw_parts(title.as_ptr().cast::<u8>(), title_len) };
+    info!("Starting Game Boy ROM '{}'", core::str::from_utf8(title_bytes).unwrap_or("unknown"));
+
+    let joypad = unsafe { gb_get_joypad_ptr(gb_ptr) };
+    assert!(!joypad.is_null(), "Peanut-GB returned a null joypad pointer");
+    terminal::framebuffer().lock().clear();
+
+    loop {
+        let mut exit = false;
+        while let Some(event) = keyboard_buffer().pop_key_event() {
+            if event.pressed() && event.scancode() == Some(Scancode::Escape) {
+                exit = true;
+                continue;
+            }
+
+            let Some(button) = event.scancode().and_then(joypad_button) else {
+                continue;
+            };
+
+            unsafe {
+                if event.pressed() {
+                    *joypad &= !(button as u8);
+                } else {
+                    *joypad |= button as u8;
+                }
+            }
+        }
+        if exit {
+            break;
+        }
+
+        let frame_start = pit::system_time();
+        unsafe { gb_run_frame(gb_ptr); }
+        let elapsed = pit::system_time().wrapping_sub(frame_start);
+        if elapsed < MS_PER_FRAME {
+            pit::wait(MS_PER_FRAME - elapsed);
+        }
+    }
+
+    export_save_data();
+}
+
+/// Initialize cartridge RAM and preload save data from the initrd when available.
+fn initialize_cart_ram(save_size: usize) {
+    let filesystem = filesystem();
+    let mut cart_ram = CART_RAM.lock();
+    cart_ram.clear();
+    cart_ram.resize(save_size, 0);
+
+    if save_size == 0 {
+        info!("The loaded ROM does not use cartridge RAM");
+        return;
+    }
+
+    let file = match filesystem.open(SAVE_PATH) {
+        Ok(file) => file,
+        Err(FsError::FileNotFound) => {
+            info!("No save file found; starting with {} bytes of empty cartridge RAM", save_size);
+            return;
+        }
+        Err(error) => panic!("Failed to open save file: {:?}", error),
+    };
+
+    let file_size = filesystem.size(file).expect("Failed to get save file size");
+    if file_size != save_size {
+        filesystem.close(file).expect("Failed to close invalid save file");
+        warn!(
+            "Ignoring save file with invalid size: expected {}, got {}",
+            save_size, file_size
+        );
+        return;
+    }
+    let bytes_read = filesystem.read(file, &mut cart_ram).expect("Failed to read save file");
+    filesystem.close(file).expect("Failed to close save file");
+    assert_eq!(bytes_read, save_size, "Failed to read complete save file");
+    info!("Loaded {} bytes of cartridge RAM from '{}'", save_size, SAVE_PATH);
+}
+
+/// Export cartridge RAM as raw bytes through the third serial port.
+fn export_save_data() {
+    let cart_ram = CART_RAM.lock();
+    let mut serial = COM3.lock();
+    serial.init();
+    for &byte in cart_ram.iter() {
+        serial.write_raw_byte(byte);
+    }
+    info!("Exported {} bytes of cartridge RAM through COM3", cart_ram.len());
+}
+
+/// Map keyboard scancodes to Game Boy joypad buttons.
+fn joypad_button(scancode: Scancode) -> Option<JoypadButton> {
+    match scancode {
+        Scancode::X => Some(JoypadButton::A),
+        Scancode::Y => Some(JoypadButton::B),
+        Scancode::Space => Some(JoypadButton::Select),
+        Scancode::Enter => Some(JoypadButton::Start),
+        Scancode::Right => Some(JoypadButton::Right),
+        Scancode::Left => Some(JoypadButton::Left),
+        Scancode::Up => Some(JoypadButton::Up),
+        Scancode::Down => Some(JoypadButton::Down),
+        _ => None,
+    }
 }
