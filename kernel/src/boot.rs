@@ -104,7 +104,8 @@ pub extern "C" fn main(multiboot_magic: u32, multiboot: &multiboot::BootInfo) ->
 
     init_interrupts();
 
-    demo::lesson6::peanut_gb::play("/roms/2048.gb");
+    demo::lesson7::print_pci_devices();
+    demo::lesson7::rtl8139_demo();
 
     // Endless loop, as we cannot return from main().
     loop {}

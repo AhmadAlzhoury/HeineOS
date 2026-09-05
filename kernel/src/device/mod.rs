@@ -9,3 +9,4 @@ pub mod keyboard;
 pub mod speaker;
 pub mod pic;
 pub mod pit;
+pub mod pci;
