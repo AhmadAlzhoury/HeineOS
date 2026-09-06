@@ -17,8 +17,8 @@ pub fn ps() {
     println!("");
     println!("  TID   STATE");
     for thread in &threads {
-        let thread_state = if thread.id == 0 { "idle" } else { thread.state.as_str() };
-        println!("  {:<5} {}", thread.id, thread_state);
+        let state = if thread.is_idle { "idle" } else { thread.state.as_str() };
+        println!("  {:<5} {}", thread.id, state);
     }
     println!("");
     println!("{} thread(s).", threads.len());

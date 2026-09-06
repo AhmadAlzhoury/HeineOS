@@ -220,7 +220,7 @@ impl TarFs {
 
         // The path does not name an archive entry. It can still be a directory that is
         // only implied by the names of the entries below it.
-        if Self::directory_has_entries(self, &normalized) {
+        if self.directory_has_entries(normalized) {
             Ok(Metadata { size: 0, file_type: FileType::Directory })
         } else {
             Err(FsError::FileNotFound)

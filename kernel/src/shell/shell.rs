@@ -13,7 +13,7 @@
 use crate::device::terminal::terminal;
 use crate::shell::commands;
 use crate::shell::history::History;
-use crate::shell::input::{self, ReadLineResult, PROMPT};
+use crate::shell::input::{self, PROMPT, ReadLineResult};
 use crate::shell::parser;
 
 /// Run the interactive shell.

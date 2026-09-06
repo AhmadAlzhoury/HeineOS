@@ -84,6 +84,10 @@ struct SchedulerState {
 /// It is round-robin-based and uses a queue to manage the threads.
 pub struct Scheduler {
     state: Spinlock<SchedulerState>,
+    /// ID of the idle thread created in `new()`.
+    /// Stored separately, so that `thread_snapshot()` can mark that thread without
+    /// its callers having to know how the idle thread is created.
+    idle_thread_id: usize,
 }
 
 /// The state a thread can be in, as far as the scheduler can tell.
@@ -119,20 +123,25 @@ pub struct ThreadInfo {
     pub id: usize,
     /// The state the thread was in when the snapshot was taken.
     pub state: ThreadState,
+    /// Whether this is the idle thread, which only runs when nothing else can.
+    pub is_idle: bool,
 }
 
 impl Scheduler {
     /// Create a new scheduler instance with an empty ready queue
     /// and an idle thread as the active thread.
     pub fn new() -> Self {
+        let idle = Thread::new(idle_thread);
+        let idle_thread_id = idle.id();
+
         let state = SchedulerState {
             initialized: false,
-            active_thread: Some(Thread::new(idle_thread)),
+            active_thread: Some(idle),
             ready_queue: LinkedQueue::new(),
             terminated_threads: LinkedQueue::new(),
         };
 
-        Scheduler { state: Spinlock::new(state) }
+        Scheduler { state: Spinlock::new(state), idle_thread_id }
     }
 
     /// Get the ID of the currently active thread.
@@ -158,7 +167,7 @@ impl Scheduler {
         let state = self.state.lock();
 
         if let Some(active_thread) = state.active_thread.as_ref() {
-            threads.push(ThreadInfo { id: active_thread.id(), state: ThreadState::Running });
+            threads.push(self.thread_info(active_thread.id(), ThreadState::Running));
         }
 
         for thread in state.ready_queue.iter() {
@@ -166,10 +175,15 @@ impl Scheduler {
                 break;
             }
 
-            threads.push(ThreadInfo { id: thread.id(), state: ThreadState::Ready });
+            threads.push(self.thread_info(thread.id(), ThreadState::Ready));
         }
 
         threads
+    }
+
+    /// Describe a single thread for `thread_snapshot()`.
+    fn thread_info(&self, id: usize, state: ThreadState) -> ThreadInfo {
+        ThreadInfo { id, state, is_idle: id == self.idle_thread_id }
     }
 
     /// Start the scheduler.

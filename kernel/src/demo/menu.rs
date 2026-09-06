@@ -10,7 +10,7 @@ use crate::device::key::Scancode;
 use crate::device::keyboard::keyboard_buffer;
 use crate::device::terminal::{self, terminal};
 use crate::library::bitmap::Bitmap;
-use crate::library::input::is_ctrl_c;
+use crate::library::input::{drain_keyboard_buffer, is_ctrl_c};
 use crate::thread::scheduler::scheduler;
 
 const IMAGE_PATH: &str = "/heine.bmp";
@@ -107,11 +107,6 @@ pub fn wait_for_escape() {
             return;
         }
     }
-}
-
-/// Remove pending key events before changing ownership of keyboard input.
-pub fn drain_keyboard_buffer() {
-    crate::library::input::drain_keyboard_buffer();
 }
 
 fn draw(image: &Bitmap, selected: usize) {

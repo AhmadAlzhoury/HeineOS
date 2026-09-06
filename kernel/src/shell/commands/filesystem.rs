@@ -7,10 +7,10 @@
  * License: GPLv3
  */
 
+use crate::filesystem::tarfs::{FileHandle, FileType, FsError, Metadata, TarFs, filesystem};
 use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
-use crate::filesystem::tarfs::{filesystem, FileHandle, FileType, FsError, Metadata, TarFs};
 
 /// Maximum number of bytes printed by `cat`.
 const MAX_CAT_BYTES: usize = 64 * 1024;
@@ -47,7 +47,12 @@ pub fn ls(argument: &str) {
                 println!("  {:width$} <dir>", name, width = NAME_WIDTH);
             }
             FileType::File => {
-                println!("  {:width$} {} bytes", entry.name, entry.size, width = NAME_WIDTH)
+                println!(
+                    "  {:width$} {} bytes",
+                    entry.name,
+                    entry.size,
+                    width = NAME_WIDTH
+                )
             }
         }
     }

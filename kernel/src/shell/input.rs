@@ -11,13 +11,13 @@
  * License: GPLv3
  */
 
-use alloc::string::String;
 use crate::device::key::{KeyEvent, KeyModifiers, Scancode};
 use crate::device::keyboard::keyboard_buffer;
 use crate::device::terminal::terminal;
 use crate::library::input::{is_ctrl, is_ctrl_c};
 use crate::shell::history::History;
 use crate::shell::registry::{self, CommandInfo};
+use alloc::string::String;
 
 /// The prompt that is printed before every input line.
 ///

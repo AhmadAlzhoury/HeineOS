@@ -4,12 +4,12 @@
  * License: GPLv3
  */
 
+use super::{hardware, threads};
 use crate::allocator::global;
 use crate::device::framebuffer;
 use crate::device::pit;
 use crate::device::terminal;
 use crate::machine;
-use super::{hardware, threads};
 
 /// Longest duration accepted by `sleep`.
 /// The shell cannot read any input while sleeping, so the wait is limited.
@@ -99,7 +99,12 @@ pub fn framebuffer_info() -> FramebufferInfo {
 
     let (columns, rows) = terminal::terminal().lock().size();
 
-    FramebufferInfo { width, height, columns, rows }
+    FramebufferInfo {
+        width,
+        height,
+        columns,
+        rows,
+    }
 }
 
 /// Print a summary of the whole system.
@@ -123,7 +128,10 @@ pub fn sysinfo() {
     println!("  Heap used:    {} bytes", stats.used);
     println!("  Heap free:    {} bytes", stats.free);
     println!("  Framebuffer:  {}x{}", display.width, display.height);
-    println!("  Terminal:     {}x{} characters", display.columns, display.rows);
+    println!(
+        "  Terminal:     {}x{} characters",
+        display.columns, display.rows
+    );
     println!("  PCI devices:  {}", hardware::device_count());
     println!("  Filesystem:   TarFs (read-only)");
     println!("");
@@ -168,6 +176,7 @@ fn print_sleep_usage() {
 /// no hardware specific code. It never returns.
 pub fn shutdown() -> ! {
     println!("Shutting down HeineOS...");
+    pit::wait(50);
     machine::shutdown()
 }
 
@@ -176,5 +185,6 @@ pub fn shutdown() -> ! {
 /// Like `shutdown`, the reset itself is left to the machine module.
 pub fn reboot() -> ! {
     println!("Rebooting HeineOS...");
+    pit::wait(50);
     machine::reboot()
 }

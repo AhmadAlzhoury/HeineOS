@@ -27,7 +27,9 @@ pub struct History {
 impl History {
     /// Create an empty history.
     pub fn new() -> Self {
-        History { entries: VecDeque::new() }
+        History {
+            entries: VecDeque::new(),
+        }
     }
 
     /// Add a command line to the history.

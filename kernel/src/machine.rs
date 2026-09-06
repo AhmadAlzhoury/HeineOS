@@ -52,7 +52,13 @@ pub fn shutdown() -> ! {
 
     for address in ACPI_SHUTDOWN_PORTS {
         let mut port = IoPort::new(address);
-        unsafe { port.outw(ACPI_SLEEP_COMMAND); }
+
+        // SAFETY: Writing to an I/O port is unsafe because it talks to hardware.
+        // Here it either powers the machine off or, if no ACPI controller listens
+        // on this address, has no effect at all. No memory is accessed.
+        unsafe {
+            port.outw(ACPI_SLEEP_COMMAND);
+        }
     }
 
     halt_forever()
@@ -69,7 +75,12 @@ pub fn reboot() -> ! {
     keyboard::reset_cpu();
 
     let mut port = IoPort::new(RESET_CONTROL_PORT);
-    unsafe { port.outb(RESET_CONTROL_COMMAND); }
+
+    // SAFETY: This write resets the machine. Interrupts are already disabled and
+    // no kernel data is touched, so nothing can be left in an inconsistent state.
+    unsafe {
+        port.outb(RESET_CONTROL_COMMAND);
+    }
 
     halt_forever()
 }

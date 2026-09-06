@@ -82,7 +82,12 @@ pub const COMMANDS: &[CommandInfo] = &[
         category: "General",
         usage: "about",
         description: "Show information about HeineOS",
-        help: &["about - Show information about HeineOS", "", "Usage:", "  about"],
+        help: &[
+            "about - Show information about HeineOS",
+            "",
+            "Usage:",
+            "  about",
+        ],
     },
     CommandInfo {
         name: "history",
@@ -365,14 +370,38 @@ pub struct ShortcutInfo {
 /// They are kept here next to the commands, so that the shortcuts are described
 /// in exactly one place as well.
 pub const SHORTCUTS: &[ShortcutInfo] = &[
-    ShortcutInfo { keys: "Backspace", description: "Delete the previous character" },
-    ShortcutInfo { keys: "Up/Down", description: "Walk through the command history" },
-    ShortcutInfo { keys: "Tab", description: "Complete the command name" },
-    ShortcutInfo { keys: "Ctrl+C", description: "Cancel the current input line" },
-    ShortcutInfo { keys: "Ctrl+L", description: "Clear the screen, keep the input" },
-    ShortcutInfo { keys: "Ctrl+U", description: "Clear the current input line" },
-    ShortcutInfo { keys: "Ctrl+Up/Down", description: "Scroll through older output" },
-    ShortcutInfo { keys: "Ctrl+PgUp/PgDn", description: "Scroll by a whole page" },
+    ShortcutInfo {
+        keys: "Backspace",
+        description: "Delete the previous character",
+    },
+    ShortcutInfo {
+        keys: "Up/Down",
+        description: "Walk through the command history",
+    },
+    ShortcutInfo {
+        keys: "Tab",
+        description: "Complete the command name",
+    },
+    ShortcutInfo {
+        keys: "Ctrl+C",
+        description: "Cancel the current input line",
+    },
+    ShortcutInfo {
+        keys: "Ctrl+L",
+        description: "Clear the screen, keep the input",
+    },
+    ShortcutInfo {
+        keys: "Ctrl+U",
+        description: "Clear the current input line",
+    },
+    ShortcutInfo {
+        keys: "Ctrl+Up/Down",
+        description: "Scroll through older output",
+    },
+    ShortcutInfo {
+        keys: "Ctrl+PgUp/PgDn",
+        description: "Scroll by a whole page",
+    },
 ];
 
 /// Look up a command by its exact name.

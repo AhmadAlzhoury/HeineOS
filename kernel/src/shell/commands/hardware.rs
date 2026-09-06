@@ -7,7 +7,7 @@
  * License: GPLv3
  */
 
-use crate::device::pci::{self, pci_bus, PciDevice};
+use crate::device::pci::{self, PciDevice, pci_bus};
 use crate::device::speaker::{self, SPEAKER};
 
 /// Number of base address registers of a PCI device.

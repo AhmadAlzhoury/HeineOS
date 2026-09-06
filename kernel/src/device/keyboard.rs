@@ -450,12 +450,16 @@ pub fn reset_cpu() {
 
     // Wait until the controller is able to accept a command.
     for _ in 0..RESET_TIMEOUT {
+        // SAFETY: Reading the status register of the keyboard controller has no
+        // side effects and is the documented way to poll the controller.
         let status = KeyboardStatus::from_bits_retain(unsafe { control_port.inb() });
         if !status.contains(KeyboardStatus::INPUT_BUFFER_FULL) {
             break;
         }
     }
 
+    // SAFETY: Sending this command pulses the reset line of the CPU, which restarts
+    // the machine. Nothing is executed afterwards, so no kernel state can be corrupted.
     unsafe { control_port.outb(KeyboardCommand::CpuReset as u8); }
 }
 

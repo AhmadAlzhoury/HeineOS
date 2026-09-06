@@ -64,8 +64,7 @@ pub fn dealloc(ptr: *mut u8, layout: Layout) {
 /// The allocator lock is released before this function returns, so the caller may
 /// allocate memory (e.g. for formatted output) while working with the result.
 pub fn heap_stats() -> HeapStats {
-    let stats = ALLOCATOR.lock().stats();
-    stats
+    ALLOCATOR.lock().stats()
 }
 
 /// Dump heap free list. Must be called by own program.
