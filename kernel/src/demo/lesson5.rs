@@ -61,7 +61,7 @@ pub fn thread_demo() {
 
 /// Increment and display a counter until it reaches the limit.
 fn thread_entry() {
-    const COUNTER_LIMIT: usize = 1000;
+    const COUNTER_LIMIT: usize = 10000;
     const YIELD_INTERVAL: usize = 10;
 
     let id = scheduler().get_active_tid();

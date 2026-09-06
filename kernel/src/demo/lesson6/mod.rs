@@ -11,7 +11,7 @@ pub fn filesystem_demo() {
 
     terminal().lock().clear();
     println!("Filesystem Demo:");
-    println!("================");
+    println!("");
     println!("Reading '{}':\n", PATH);
 
     let filesystem = filesystem();

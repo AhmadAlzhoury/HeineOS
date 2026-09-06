@@ -20,6 +20,10 @@ use alloc::alloc::Layout;
 use crate::allocator::list::LinkedListAllocator;
 use crate::library::spinlock::{Spinlock, SpinlockGuard};
 
+// Re-exported so that other kernel components can query heap statistics
+// without depending on the internals of the list allocator.
+pub use crate::allocator::list::HeapStats;
+
 #[global_allocator]
 /// Global heap allocator instance, used by the Rust compiler for dynamic memory allocation.
 static ALLOCATOR: Locked<LinkedListAllocator> = Locked::new(LinkedListAllocator::new());
@@ -53,6 +57,15 @@ pub fn dealloc(ptr: *mut u8, layout: Layout) {
     unsafe {
         ALLOCATOR.lock().dealloc(ptr, layout)
     }
+}
+
+/// Get a snapshot of the current heap usage.
+///
+/// The allocator lock is released before this function returns, so the caller may
+/// allocate memory (e.g. for formatted output) while working with the result.
+pub fn heap_stats() -> HeapStats {
+    let stats = ALLOCATOR.lock().stats();
+    stats
 }
 
 /// Dump heap free list. Must be called by own program.

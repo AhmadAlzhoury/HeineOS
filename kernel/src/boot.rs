@@ -42,6 +42,8 @@ mod interrupt;
 mod coroutine;
 mod thread;
 mod filesystem;
+mod machine;
+mod shell;
 
 unsafe extern "C" {
     fn load_gdt();
@@ -97,6 +99,9 @@ pub extern "C" fn main(multiboot_magic: u32, multiboot: &multiboot::BootInfo) ->
 
     allocator::global::init_allocator(consts::heap_start(), consts::HEAP_SIZE);
 
+    // The scrollback buffers live on the heap, so they can only be created after the heap is initialized.
+    terminal::terminal().lock().enable_scrollback();
+
     let initrd = multiboot
         .find_tag::<multiboot::ModuleTag>(multiboot::TagType::Module)
         .expect("Missing initial ramdisk module");
@@ -106,7 +111,9 @@ pub extern "C" fn main(multiboot_magic: u32, multiboot: &multiboot::BootInfo) ->
 
     init_interrupts();
 
-    scheduler().ready(Thread::new(demo::menu::run));
+    // The shell is the main interactive thread of HeineOS.
+    // It opens the demo menu synchronously when the user enters the `demo` command.
+    scheduler().ready(Thread::new(shell::run));
     scheduler().schedule();
 
     // Endless loop, as we cannot return from main().

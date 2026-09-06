@@ -161,29 +161,51 @@ impl Thread {
     fn prepare_stack(&mut self) {
         let kickoff = (Thread::kickoff as *const ()) as u64;
         let thread = ptr::from_mut(self) as u64;
-        let length = self.stack.len();
+        let top = self.aligned_return_slot();
 
-        // Keep the last word unused so the stack is aligned as required by the
-        // x86-64 System V ABI when `ret` enters `kickoff`.
-        self.stack[length - 2] = kickoff; // Address of 'kickoff'
-        self.stack[length - 3] = 0; // r8
-        self.stack[length - 4] = 0; // r9
-        self.stack[length - 5] = 0; // r10
-        self.stack[length - 6] = 0; // r11
-        self.stack[length - 7] = 0; // r12
-        self.stack[length - 8] = 0; // r13
-        self.stack[length - 9] = 0; // r14
-        self.stack[length - 10] = 0; // r15
-        self.stack[length - 11] = 0; // rax
-        self.stack[length - 12] = 0; // rbx
-        self.stack[length - 13] = 0; // rcx
-        self.stack[length - 14] = 0; // rdx
-        self.stack[length - 15] = 0; // rsi
-        self.stack[length - 16] = thread; // rdi -> First parameter for 'kickoff'
-        self.stack[length - 17] = 0; // rbp
-        self.stack[length - 18] = 0x2; // rflags (IE = 0); interrupts disabled
+        self.stack[top] = kickoff; // Address of 'kickoff'
+        self.stack[top - 1] = 0; // r8
+        self.stack[top - 2] = 0; // r9
+        self.stack[top - 3] = 0; // r10
+        self.stack[top - 4] = 0; // r11
+        self.stack[top - 5] = 0; // r12
+        self.stack[top - 6] = 0; // r13
+        self.stack[top - 7] = 0; // r14
+        self.stack[top - 8] = 0; // r15
+        self.stack[top - 9] = 0; // rax
+        self.stack[top - 10] = 0; // rbx
+        self.stack[top - 11] = 0; // rcx
+        self.stack[top - 12] = 0; // rdx
+        self.stack[top - 13] = 0; // rsi
+        self.stack[top - 14] = thread; // rdi -> First parameter for 'kickoff'
+        self.stack[top - 15] = 0; // rbp
+        self.stack[top - 16] = 0x2; // rflags (IE = 0); interrupts disabled
 
-        self.stack_ptr -= size_of::<u64>() * 17;
+        // The context above is restored by 16 pops, so the thread starts with
+        // `rsp` pointing at the saved rflags.
+        let stack_ptr = ptr::from_ref(&self.stack[top - 16]) as usize;
+        self.stack_ptr = stack_ptr;
+    }
+
+    /// Index of the stack slot that holds the return address into `kickoff`.
+    ///
+    /// The x86-64 System V ABI requires `rsp` to be 16-byte aligned before a `call`,
+    /// so a function finds `rsp % 16 == 8` on entry. `thread_start` and `thread_switch`
+    /// enter `kickoff` with `ret`, which pops the return address, so the slot holding
+    /// that address must itself lie on a 16-byte boundary.
+    ///
+    /// The stack is a `Vec<u64>` and the kernel heap only guarantees 8-byte alignment,
+    /// so the top of the stack is not necessarily 16-byte aligned. When it is not, the
+    /// topmost usable slot is skipped and the next one down is used instead.
+    ///
+    /// This is not a cosmetic detail: code that spills SSE registers with aligned moves
+    /// (`movaps`) raises a general protection fault on a misaligned stack. The kernel
+    /// itself is compiled without SSE, but the C code of the Peanut-GB demo is not.
+    fn aligned_return_slot(&self) -> usize {
+        let slot = self.stack.len() - 2;
+        let address = ptr::from_ref(&self.stack[slot]) as usize;
+
+        if address % 16 == 0 { slot } else { slot - 1 }
     }
 
     /// Called indirectly by using the prepared stack in 'thread_start' and 'thread_switch'.

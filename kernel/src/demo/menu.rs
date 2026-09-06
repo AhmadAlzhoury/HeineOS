@@ -4,20 +4,28 @@
  * License: GPLv3
  */
 
-use crate::demo::{lesson1, lesson2, lesson3, lesson4, lesson5, lesson6, lesson7};
+use crate::demo::{lesson1, lesson2, lesson4, lesson5, lesson6, lesson7};
 use crate::device::framebuffer::{self, BLACK, GRAY, GREEN};
 use crate::device::key::Scancode;
 use crate::device::keyboard::keyboard_buffer;
 use crate::device::terminal::{self, terminal};
 use crate::library::bitmap::Bitmap;
+use crate::library::input::is_ctrl_c;
 use crate::thread::scheduler::scheduler;
 
 const IMAGE_PATH: &str = "/heine.bmp";
-const MENU_TOP: usize = 2;
+/// First terminal row used for the menu entries. The rows above hold the title
+/// and the control hints.
+const MENU_TOP: usize = 5;
+/// The control hints shown below the menu title.
+const MENU_HINTS: &[&str] = &[
+    "Use Up/Down and Enter.",
+    "Esc exits a running demo.",
+    "Ctrl+C returns to the shell.",
+];
 const MENU_ENTRIES: &[&str] = &[
     "Text Demo                 ",
     "Keyboard Demo             ",
-    "Interrupt Keyboard Demo   ",
     "Heap Demo                 ",
     "PC Speaker Demo           ",
     "Coroutine Demo            ",
@@ -30,7 +38,18 @@ const MENU_ENTRIES: &[&str] = &[
     "RTL8139 Demo              ",
 ];
 
-/// Display the demo menu forever and launch the selected demo on Enter.
+/// What the user requested while the menu was displayed.
+enum MenuAction {
+    /// Start the currently selected demo.
+    Launch,
+    /// Leave the menu and return to the caller (the shell).
+    Exit,
+}
+
+/// Display the demo menu and launch the selected demo on Enter.
+///
+/// The function returns to its caller when the user presses Ctrl+C, which is how
+/// the shell regains control of the terminal and the keyboard.
 pub fn run() {
     let image = Bitmap::read_from_file(IMAGE_PATH)
         .expect("Failed to read menu bitmap")
@@ -41,27 +60,42 @@ pub fn run() {
         drain_keyboard_buffer();
         draw(&image, selected);
 
-        loop {
-            let event = keyboard_buffer().poll_key_event();
-            if !event.pressed() {
-                continue;
-            }
+        match read_menu_action(&image, &mut selected) {
+            MenuAction::Launch => launch(selected),
+            MenuAction::Exit => return,
+        }
+    }
+}
 
-            match event.scancode() {
-                Some(Scancode::Up) => {
-                    selected = selected.checked_sub(1).unwrap_or(MENU_ENTRIES.len() - 1);
-                    draw(&image, selected);
-                }
-                Some(Scancode::Down) => {
-                    selected = (selected + 1) % MENU_ENTRIES.len();
-                    draw(&image, selected);
-                }
-                Some(Scancode::Enter) => break,
-                _ => {}
-            }
+/// Handle key events until a demo should be launched or the menu should be left.
+///
+/// Up and Down change the selection and redraw the menu immediately, so this
+/// function also needs access to the menu bitmap.
+fn read_menu_action(image: &Bitmap, selected: &mut usize) -> MenuAction {
+    loop {
+        let event = keyboard_buffer().poll_key_event();
+        if !event.pressed() {
+            continue;
         }
 
-        launch(selected);
+        // Checked before the scancode match, because Ctrl+C also reports the
+        // scancode of the 'C' key.
+        if is_ctrl_c(&event) {
+            return MenuAction::Exit;
+        }
+
+        match event.scancode() {
+            Some(Scancode::Up) => {
+                *selected = selected.checked_sub(1).unwrap_or(MENU_ENTRIES.len() - 1);
+                draw(image, *selected);
+            }
+            Some(Scancode::Down) => {
+                *selected = (*selected + 1) % MENU_ENTRIES.len();
+                draw(image, *selected);
+            }
+            Some(Scancode::Enter) => return MenuAction::Launch,
+            _ => {}
+        }
     }
 }
 
@@ -77,7 +111,7 @@ pub fn wait_for_escape() {
 
 /// Remove pending key events before changing ownership of keyboard input.
 pub fn drain_keyboard_buffer() {
-    while keyboard_buffer().pop_key_event().is_some() {}
+    crate::library::input::drain_keyboard_buffer();
 }
 
 fn draw(image: &Bitmap, selected: usize) {
@@ -86,7 +120,9 @@ fn draw(image: &Bitmap, selected: usize) {
     let framebuffer = terminal::framebuffer();
     let mut framebuffer = framebuffer.lock();
     framebuffer.draw_str("Demo Menu:", 0, 0, GREEN, BLACK);
-    framebuffer.draw_str("Use Up/Down and Enter. Esc returns to this menu.", 0, framebuffer::CHAR_HEIGHT, GREEN, BLACK);
+    for (index, hint) in MENU_HINTS.iter().enumerate() {
+        framebuffer.draw_str(hint, 0, (index + 1) * framebuffer::CHAR_HEIGHT, GREEN, BLACK);
+    }
 
     for (index, entry) in MENU_ENTRIES.iter().enumerate() {
         let background = if index == selected { GRAY } else { BLACK };
@@ -107,23 +143,22 @@ fn launch(selected: usize) {
             wait_for_escape();
         }
         1 => lesson1::keyboard_demo(),
-        2 => lesson3::keyboard_interrupt_demo(),
-        3 => lesson2::heap_demo(),
-        4 => lesson2::speaker_demo(),
-        5 => lesson4::coroutine_demo(),
-        6 => lesson4::thread_demo(),
-        7 => lesson5::thread_demo(),
-        8 => {
+        2 => lesson2::heap_demo(),
+        3 => lesson2::speaker_demo(),
+        4 => lesson4::coroutine_demo(),
+        5 => lesson4::thread_demo(),
+        6 => lesson5::thread_demo(),
+        7 => {
             lesson6::filesystem_demo();
             wait_for_escape();
         }
-        9 => {
+        8 => {
             lesson6::bitmap_demo();
             wait_for_escape();
         }
-        10 => lesson6::peanut_gb::play("/roms/2048.gb"),
-        11 => lesson7::print_pci_devices(),
-        12 => lesson7::rtl8139_demo(),
+        9 => lesson6::peanut_gb::play("/roms/2048.gb"),
+        10 => lesson7::print_pci_devices(),
+        11 => lesson7::rtl8139_demo(),
         _ => unreachable!(),
     }
 

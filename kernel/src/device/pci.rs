@@ -311,6 +311,37 @@ impl PciBus {
     }
 }
 
+/// Get a human readable name for a PCI class code.
+///
+/// Only the classes listed in `Class` are named, everything else is reported as
+/// "Unknown". This is used to make the output of the `lspci` shell command readable.
+pub fn class_name(class: u8) -> &'static str {
+    match class {
+        0x00 => "Unclassified",
+        0x01 => "Mass storage controller",
+        0x02 => "Network controller",
+        0x03 => "Display controller",
+        0x04 => "Multimedia controller",
+        0x05 => "Memory controller",
+        0x06 => "Bridge",
+        0x07 => "Simple communication controller",
+        0x08 => "Base system peripheral",
+        0x09 => "Input device controller",
+        0x0a => "Docking station",
+        0x0b => "Processor",
+        0x0c => "Serial bus controller",
+        0x0d => "Wireless controller",
+        0x0e => "Intelligent controller",
+        0x0f => "Satellite communication controller",
+        0x10 => "Encryption controller",
+        0x11 => "Signal processing controller",
+        0x12 => "Processing accelerator",
+        0x13 => "Non-essential instrumentation",
+        0x40 => "Co-processor",
+        _ => "Unknown",
+    }
+}
+
 impl PciDevice {
     /// Create a new PCI device instance.
     const fn new(bus: u8, device: u8, function: u8) -> Self {
@@ -319,6 +350,22 @@ impl PciDevice {
             device,
             function
         }
+    }
+
+    /// Get the bus number this device is attached to.
+    /// Together with `device()` and `function()`, this is the address of the device.
+    pub fn bus(&self) -> u8 {
+        self.bus
+    }
+
+    /// Get the device number of this device on its bus.
+    pub fn device(&self) -> u8 {
+        self.device
+    }
+
+    /// Get the function number of this device.
+    pub fn function(&self) -> u8 {
+        self.function
     }
 
     /// Read an 8-bit value from the PCI configuration space at the specified offset relative to the device.

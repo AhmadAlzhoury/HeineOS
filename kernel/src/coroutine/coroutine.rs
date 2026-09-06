@@ -173,29 +173,44 @@ impl Coroutine {
     fn prepare_stack(&mut self) {
         let kickoff = (Coroutine::kickoff as *const ()) as u64;
         let coroutine = ptr::from_mut(self) as u64;
-        let length = self.stack.len();
+        let top = self.aligned_return_slot();
 
-        // Keep the last word unused so the stack is aligned as required by the
-        // x86-64 System V ABI when `ret` enters `kickoff`.
-        self.stack[length - 2] = kickoff; // Address of 'kickoff' -> Used as return address
-        self.stack[length - 3] = 0; // r8
-        self.stack[length - 4] = 0; // r9
-        self.stack[length - 5] = 0; // r10
-        self.stack[length - 6] = 0; // r11
-        self.stack[length - 7] = 0; // r12
-        self.stack[length - 8] = 0; // r13
-        self.stack[length - 9] = 0; // r14
-        self.stack[length - 10] = 0; // r15
-        self.stack[length - 11] = 0; // rax
-        self.stack[length - 12] = 0; // rbx
-        self.stack[length - 13] = 0; // rcx
-        self.stack[length - 14] = 0; // rdx
-        self.stack[length - 15] = 0; // rsi
-        self.stack[length - 16] = coroutine; // rdi -> First parameter for 'kickoff'
-        self.stack[length - 17] = 0; // rbp
-        self.stack[length - 18] = 0x2; // rflags (IE = 0); interrupts disabled
+        self.stack[top] = kickoff; // Address of 'kickoff' -> Used as return address
+        self.stack[top - 1] = 0; // r8
+        self.stack[top - 2] = 0; // r9
+        self.stack[top - 3] = 0; // r10
+        self.stack[top - 4] = 0; // r11
+        self.stack[top - 5] = 0; // r12
+        self.stack[top - 6] = 0; // r13
+        self.stack[top - 7] = 0; // r14
+        self.stack[top - 8] = 0; // r15
+        self.stack[top - 9] = 0; // rax
+        self.stack[top - 10] = 0; // rbx
+        self.stack[top - 11] = 0; // rcx
+        self.stack[top - 12] = 0; // rdx
+        self.stack[top - 13] = 0; // rsi
+        self.stack[top - 14] = coroutine; // rdi -> First parameter for 'kickoff'
+        self.stack[top - 15] = 0; // rbp
+        self.stack[top - 16] = 0x2; // rflags (IE = 0); interrupts disabled
 
-        self.stack_ptr -= size_of::<u64>() * 17;
+        // The context above is restored by 16 pops, so the coroutine starts with
+        // `rsp` pointing at the saved rflags.
+        let stack_ptr = ptr::from_ref(&self.stack[top - 16]) as usize;
+        self.stack_ptr = stack_ptr;
+    }
+
+    /// Index of the stack slot that holds the return address into `kickoff`.
+    ///
+    /// See `Thread::aligned_return_slot()` for the reasoning: the x86-64 System V ABI
+    /// requires that `kickoff` is entered with `rsp % 16 == 8`, and since `kickoff` is
+    /// reached through `ret`, the slot holding its address must be 16-byte aligned.
+    /// The kernel heap only guarantees 8-byte alignment for the stack buffer, so the
+    /// topmost slot is skipped when it does not satisfy that.
+    fn aligned_return_slot(&self) -> usize {
+        let slot = self.stack.len() - 2;
+        let address = ptr::from_ref(&self.stack[slot]) as usize;
+
+        if address % 16 == 0 { slot } else { slot - 1 }
     }
 
     /// Called indirectly by using the prepared stack in 'coroutine_start' and 'coroutine_switch'.

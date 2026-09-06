@@ -93,7 +93,7 @@ pub fn heap_demo() {
 pub fn speaker_demo() {
     terminal().lock().clear();
     println!("PC Speaker Demo");
-    println!("===============");
+    println!("");
     println!("Playing the Tetris theme. Press 'Esc' to exit...");
 
     speaker::set_cancelled(false);

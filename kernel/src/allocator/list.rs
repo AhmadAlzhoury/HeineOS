@@ -7,7 +7,6 @@
  */
 
 use alloc::alloc::{GlobalAlloc, Layout};
-use log::info;
 use crate::allocator::global::{align_up, Locked};
 
 /// Header of a free block in the list allocator.
@@ -38,6 +37,25 @@ impl ListNode {
     fn end_addr(&self) -> usize {
         self.start_addr() + self.size
     }
+}
+
+/// Aggregate statistics about the state of the heap.
+///
+/// The values are a snapshot taken while the allocator was locked.
+/// They describe the kernel heap only and say nothing about the physical memory of the system.
+#[derive(Copy, Clone, Debug)]
+pub struct HeapStats {
+    /// Total size of the heap in bytes.
+    pub total: usize,
+    /// Sum of the sizes of all blocks in the free list.
+    pub free: usize,
+    /// Bytes currently handed out to allocations (`total - free`).
+    /// This includes padding added for alignment and for the allocator metadata.
+    pub used: usize,
+    /// Number of blocks in the free list. A high number indicates fragmentation.
+    pub free_blocks: usize,
+    /// Size of the largest single free block, i.e. the largest possible allocation.
+    pub largest_free_block: usize,
 }
 
 /// A linked list allocator that uses a free list to manage memory.
@@ -182,6 +200,35 @@ impl LinkedListAllocator {
         let size = layout.size().max(size_of::<ListNode>());
 
         (size, layout.align())
+    }
+
+    /// Collect aggregate statistics by walking the free list once.
+    ///
+    /// This is a read-only operation and does not allocate, so it can safely be
+    /// called while the allocator lock is held.
+    pub fn stats(&self) -> HeapStats {
+        let total = self.heap_end.saturating_sub(self.heap_start);
+        let mut free = 0;
+        let mut free_blocks = 0;
+        let mut largest_free_block = 0;
+
+        let mut current = self.head.next.as_deref();
+        while let Some(block) = current {
+            free += block.size;
+            free_blocks += 1;
+            if block.size > largest_free_block {
+                largest_free_block = block.size;
+            }
+            current = block.next.as_deref();
+        }
+
+        HeapStats {
+            total,
+            free,
+            used: total.saturating_sub(free),
+            free_blocks,
+            largest_free_block,
+        }
     }
 
     /// Dump the free list for debugging purposes.

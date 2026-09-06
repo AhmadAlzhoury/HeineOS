@@ -6,6 +6,9 @@
  */
 
 use alloc::collections::BTreeMap;
+use alloc::format;
+use alloc::string::String;
+use alloc::vec::Vec;
 use core::cmp::min;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use tar_no_std::{ArchiveEntry, TarArchiveRef};
@@ -65,6 +68,37 @@ pub enum SeekMode {
     End
 }
 
+/// The type of an entry in the filesystem.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum FileType {
+    /// A regular file, which can be opened and read.
+    File,
+    /// A directory, which can be listed.
+    Directory,
+}
+
+/// A single entry of a directory listing.
+///
+/// This type exists so that the contents of the archive can be enumerated without
+/// exposing the underlying tar archive.
+pub struct DirectoryEntry {
+    /// The name of the entry, without the path of its parent directory.
+    pub name: String,
+    /// The size of the entry in bytes. Directories are reported with a size of zero.
+    pub size: usize,
+    /// Whether the entry is a file or a directory.
+    pub file_type: FileType,
+}
+
+/// Metadata of a single file or directory.
+#[derive(Copy, Clone, Debug)]
+pub struct Metadata {
+    /// The size of the file in bytes. Directories are reported with a size of zero.
+    pub size: usize,
+    /// Whether the entry is a file or a directory.
+    pub file_type: FileType,
+}
+
 /// An open file in the TarFs filesystem, containing the archive entry and the current read position.
 struct OpenFile {
     /// The entry in the tar archive representing the file.
@@ -89,6 +123,159 @@ impl TarFs {
     /// Generate the next unique file handle ID.
     fn next_handle_id(&self) -> usize {
         self.next_handle.fetch_add(1, Ordering::SeqCst)
+    }
+
+    /// List the entries that are located directly below the given path.
+    ///
+    /// A tar archive is a flat list of full path names, it has no real directory
+    /// structure. The directory tree is therefore derived from those names: every
+    /// archive entry starting with the path of the listed directory contributes either
+    /// a file (no further slash in the remaining name) or a subdirectory (the part in
+    /// front of the next slash). This works regardless of whether the archive contains
+    /// explicit directory entries or not.
+    ///
+    /// The listing is sorted by name. `FsError::FileNotFound` is returned if no entry
+    /// belongs to the given path. The root directory always exists.
+    pub fn list(&self, path: &str) -> Result<Vec<DirectoryEntry>, FsError> {
+        let prefix = Self::directory_prefix(path);
+        let mut entries: Vec<DirectoryEntry> = Vec::new();
+        // The root directory is always present, even if the archive is empty.
+        let mut directory_exists = prefix.is_empty();
+
+        for entry in self.archive.entries() {
+            let filename = entry.filename();
+            let Ok(raw_name) = filename.as_str() else {
+                continue;
+            };
+
+            // Directory entries in a tar archive end with a slash. The flag has to
+            // be read before the slash is removed, because it is the only thing
+            // that distinguishes an empty directory from a file.
+            let is_directory_entry = raw_name.ends_with('/');
+            let name = raw_name.trim_end_matches('/');
+
+            // The archive may contain an entry for the listed directory itself.
+            // It proves that the directory exists, but is not part of its contents.
+            if !prefix.is_empty() && name == prefix.trim_end_matches('/') {
+                directory_exists = true;
+                continue;
+            }
+
+            let Some(remainder) = name.strip_prefix(prefix.as_str()) else {
+                continue;
+            };
+
+            if remainder.is_empty() {
+                continue;
+            }
+
+            directory_exists = true;
+
+            match remainder.split_once('/') {
+                // The entry is located deeper in the tree, so its first path segment
+                // is a subdirectory of the listed directory.
+                Some((subdirectory, _)) => Self::push_directory(&mut entries, subdirectory),
+                // The entry is a directory directly inside the listed directory.
+                None if is_directory_entry => Self::push_directory(&mut entries, remainder),
+                // The entry is a file directly inside the listed directory.
+                None => entries.push(DirectoryEntry {
+                    name: String::from(remainder),
+                    size: entry.size(),
+                    file_type: FileType::File,
+                }),
+            }
+        }
+
+        if !directory_exists {
+            return Err(FsError::FileNotFound);
+        }
+
+        entries.sort_by(|first, second| first.name.cmp(&second.name));
+        Ok(entries)
+    }
+
+    /// Get the metadata of a single file or directory.
+    ///
+    /// Only the information actually stored in a tar archive is reported: the size of
+    /// a file and whether the path denotes a file or a directory.
+    pub fn metadata(&self, path: &str) -> Result<Metadata, FsError> {
+        let normalized = Self::normalize(path);
+
+        for entry in self.archive.entries() {
+            let filename = entry.filename();
+            let Ok(name) = filename.as_str() else {
+                continue;
+            };
+
+            if name.trim_end_matches('/') != normalized {
+                continue;
+            }
+
+            return if name.ends_with('/') {
+                Ok(Metadata { size: 0, file_type: FileType::Directory })
+            } else {
+                Ok(Metadata { size: entry.size(), file_type: FileType::File })
+            };
+        }
+
+        // The path does not name an archive entry. It can still be a directory that is
+        // only implied by the names of the entries below it.
+        if Self::directory_has_entries(self, &normalized) {
+            Ok(Metadata { size: 0, file_type: FileType::Directory })
+        } else {
+            Err(FsError::FileNotFound)
+        }
+    }
+
+    /// Check whether any archive entry is located below the given normalized path.
+    fn directory_has_entries(&self, normalized: &str) -> bool {
+        if normalized.is_empty() {
+            // The root directory always exists.
+            return true;
+        }
+
+        let prefix = format!("{}/", normalized);
+        self.archive.entries().any(|entry| {
+            entry
+                .filename()
+                .as_str()
+                .is_ok_and(|name| name.starts_with(prefix.as_str()))
+        })
+    }
+
+    /// Add a subdirectory to a listing, unless it has already been added.
+    /// A directory is usually implied by several archive entries and must appear only once.
+    fn push_directory(entries: &mut Vec<DirectoryEntry>, name: &str) {
+        let already_listed = entries
+            .iter()
+            .any(|entry| entry.file_type == FileType::Directory && entry.name == name);
+
+        if already_listed {
+            return;
+        }
+
+        entries.push(DirectoryEntry {
+            name: String::from(name),
+            size: 0,
+            file_type: FileType::Directory,
+        });
+    }
+
+    /// Turn a path into the form used inside a tar archive: no leading and no trailing slash.
+    fn normalize(path: &str) -> &str {
+        path.trim().trim_start_matches('/').trim_end_matches('/')
+    }
+
+    /// Build the prefix that all entries of the given directory share.
+    /// The root directory has an empty prefix, every other directory ends with a slash.
+    fn directory_prefix(path: &str) -> String {
+        let normalized = Self::normalize(path);
+
+        if normalized.is_empty() {
+            String::new()
+        } else {
+            format!("{}/", normalized)
+        }
     }
 
     /// Open a file by its path in the TarFs filesystem.

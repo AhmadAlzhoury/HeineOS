@@ -431,6 +431,34 @@ pub fn keyboard_buffer() -> &'static KeyEventQueue {
     KEYBOARD_BUFFER.init(KeyEventQueue::new)
 }
 
+/// Number of status reads before giving up on the keyboard controller.
+/// Without this limit, a controller that never becomes ready would hang the machine.
+const RESET_TIMEOUT: usize = 100_000;
+
+/// Pulse the CPU reset line via the keyboard controller (8042 command `0xfe`).
+///
+/// On a PC, the keyboard controller is wired to the reset line of the CPU, which
+/// makes it the classic way to reboot an x86 machine. This function lives in the
+/// keyboard driver because that driver owns the ports of the controller.
+///
+/// It uses its own `IoPort` instead of the global `KEYBOARD` instance on purpose:
+/// the caller resets the machine, which must also work while another thread holds
+/// the keyboard lock. Interrupts should be disabled before calling this function.
+/// The machine usually resets before this function returns.
+pub fn reset_cpu() {
+    let mut control_port = IoPort::new(KeyboardRegister::Control as u16);
+
+    // Wait until the controller is able to accept a command.
+    for _ in 0..RESET_TIMEOUT {
+        let status = KeyboardStatus::from_bits_retain(unsafe { control_port.inb() });
+        if !status.contains(KeyboardStatus::INPUT_BUFFER_FULL) {
+            break;
+        }
+    }
+
+    unsafe { control_port.outb(KeyboardCommand::CpuReset as u8); }
+}
+
 /// Interrupt handler struct for the keyboard.
 struct KeyboardISR;
 

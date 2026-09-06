@@ -63,6 +63,21 @@ impl<T> LinkedQueue<T> {
         }
     }
 
+    /// Iterate over the elements of the queue from front to back.
+    ///
+    /// This allows read-only inspection of a queue without removing its elements,
+    /// which is used by the scheduler to report the threads it manages.
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        let mut node = self.head.as_deref();
+
+        core::iter::from_fn(move || {
+            let current = node?;
+            node = current.next.as_deref();
+
+            Some(&current.data)
+        })
+    }
+
     /// Remove the first element that matches the given predicate.
     /// Returns true if an element was removed, false otherwise.
     /// `f` is a function that takes a reference to the data and returns true if it matches.
