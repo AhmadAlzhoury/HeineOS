@@ -78,3 +78,20 @@ Afterward, print the line that has just been entered to the terminal together wi
 However, once we have implemented a proper protection mechanism via paging, user mode threads will not be able anymore to access kernel space memory (and code).*
 
 ![System Call Test](https://raw.githubusercontent.com/hhu-bsinfo/HeineOS/refs/heads/main/media/lesson-9/system_calls.png)
+
+## Optional Assignment: Fast System Calls
+System Calls via Trap Gate are rather slow. To accommodate for that, the instructions `sysenter`/`sysexit` (Intel) and `syscall`/`sysret` (AMD) have been introduced.
+These allow to enter and leave ring 0 without triggering an interrupt.
+In x86_64-systems, only `syscall`/`sysret` are used.
+Using fast system calls requires a special GDT layout.
+
+Parameters can be passed in registers, similar to interrupt-based system calls.
+However, the RCX register (usually the fourth parameter) is already used by `syscall` instruction.
+As a workaround, the fourth parameter can be passed in another register.
+
+Configuring fast system calls requires you to write *Model Specific Registers* (MSR).
+Accessing these registers is done using the assembly instructions `rdmsr`/`wrmsr`.
+
+If you want to support both, fast and slow system calls, you can prefix the fast system call functions with `_fast`.
+
+*Note: Detailed information for this task is provided in the [Intel Software Developer’s Manual](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html) Volume 2 in chapter 4.3: Syscall and Sysret*.
