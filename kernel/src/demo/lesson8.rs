@@ -17,7 +17,7 @@ pub fn user_thread_demo() {
 
 fn kernel_thread() {
     let id = scheduler().get_active_tid();
-    let cols = terminal().lock().size().0;
+    let cols = 80;
 
     for i in 0..cols - 1 {
         {
@@ -32,7 +32,7 @@ fn kernel_thread() {
 
 fn user_thread() {
     let id = scheduler().get_active_tid();
-    let cols = terminal().lock().size().0;
+    let cols = 80;
 
     for i in 0..cols - 1 {
         {
