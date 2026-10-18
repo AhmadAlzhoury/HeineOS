@@ -3,6 +3,13 @@
  *          It just contains additional code that you should copy into your own file.
  */
 
+
+/// Low-level routine for storing `rsp0` in the current TSS
+unsafe extern "C" {
+    fn tss_set_rsp0(rsp0: usize);
+}
+
+
 /// Low-level routine for switching to the next thread.
 /// `current_stack_ptr` is a pointer to `stack_ptr` of the next coroutine (where the rsp is saved).
 /// `next_stack` is the value of `stack_ptr` of the next thread (the new rsp value).
